@@ -1,17 +1,22 @@
+from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
-import json
+from typing import Any
+
+from threat_knowledge import format_mitre_attack, generate_top_recommendations
+
 
 EXPORTS_DIR = Path(__file__).parent / "exports"
 EXPORTS_DIR.mkdir(exist_ok=True)
 
-SEVERITY_EMOJI = {
-    "Critical": "🔴",
-    "High": "🟠",
-    "Medium": "🟡",
-    "Low": "🟢",
-    "Informational": "🔵",
-    "Clean": "✅"
+SEVERITY_MARKERS = {
+    "Critical": "[CRITICAL]",
+    "High": "[HIGH]",
+    "Medium": "[MEDIUM]",
+    "Low": "[LOW]",
+    "Informational": "[INFO]",
+    "Clean": "[CLEAN]",
 }
 
 OWASP_LINKS = {
@@ -27,111 +32,59 @@ OWASP_LINKS = {
     "A10:2021": "https://owasp.org/Top10/A10_2021-Server_Side_Request_Forgery/",
 }
 
+
 def build_text_report(
     analysis_type: str,
     input_name: str,
     risk_score: int,
     severity_label: str,
-    findings: list[dict],
-    executive_summary: dict = None,
-    language: str = "en"
+    findings: list[dict[str, Any]],
+    executive_summary: dict | None = None,
+    language: str = "en",
+    rule_findings: list[dict[str, Any]] | None = None,
+    attack_timeline: list[dict[str, Any]] | None = None,
+    top_recommendations: list[str] | None = None,
 ) -> str:
-    lines = []
-    sep = "=" * 70
-    thin = "-" * 70
+    lines: list[str] = []
+    sep = "=" * 78
+    thin = "-" * 78
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    emoji = SEVERITY_EMOJI.get(severity_label, "⚠️")
+    marker = SEVERITY_MARKERS.get(severity_label, "[WARN]")
+    findings = findings or []
+    rule_findings = rule_findings or []
+    top_recommendations = top_recommendations or generate_top_recommendations(findings)
 
     lines.append(sep)
-    lines.append("          SENTINELAI — SECURITY ANALYSIS REPORT")
+    lines.append("SENTINELAI SECURITY ANALYSIS REPORT")
     lines.append(sep)
-    lines.append(f"  Generated     : {now}")
-    lines.append(f"  Analysis Type : {analysis_type.upper()}")
-    lines.append(f"  Source        : {input_name}")
-    lines.append(f"  Risk Score    : {risk_score}/100")
-    lines.append(f"  Severity      : {emoji} {severity_label}")
-    lines.append(f"  Findings      : {len(findings)}")
+    lines.append(f"Generated     : {now}")
+    lines.append(f"Analysis Type : {analysis_type.upper()}")
+    lines.append(f"Source        : {input_name}")
+    lines.append(f"Risk Score    : {risk_score}/100")
+    lines.append(f"Severity      : {marker} {severity_label}")
+    lines.append(f"Findings      : {len(findings)}")
+    lines.append(f"Rule Signals  : {len(rule_findings)}")
     lines.append(sep)
     lines.append("")
 
-    # Executive Summary
-    if executive_summary:
-        lines.append("EXECUTIVE SUMMARY")
-        lines.append(thin)
-        lines.append(f"Status : {executive_summary.get('overall_status', severity_label)}")
-        lines.append("")
-        lines.append(executive_summary.get("summary_paragraph", ""))
-        lines.append("")
-        lines.append(f"TOP PRIORITY: {executive_summary.get('top_priority_action', '')}")
-        lines.append("")
-        lines.append(f"BUSINESS RISK: {executive_summary.get('estimated_business_risk', '')}")
-        lines.append("")
-        steps = executive_summary.get("recommended_next_steps", [])
-        if steps:
-            lines.append("Recommended Next Steps:")
-            for i, step in enumerate(steps, 1):
-                lines.append(f"  {i}. {step}")
-        lines.append("")
-
-    # Detailed Findings
-    lines.append("DETAILED FINDINGS")
-    lines.append(thin)
-
-    if not findings:
-        lines.append("No threats detected. System appears clean based on available data.")
-    else:
-        for idx, f in enumerate(findings, 1):
-            sev = f.get("severity", "Unknown")
-            sev_emoji = SEVERITY_EMOJI.get(sev, "⚠️")
-            conf = int(float(f.get("confidence", 0)) * 100)
-
-            lines.append(f"\n[FINDING #{idx}]  {sev_emoji} {f.get('threat_type', 'Unknown')}")
-            lines.append(f"  Severity    : {sev}  |  Confidence: {conf}%")
-            lines.append(f"  OWASP       : {f.get('owasp_category', 'N/A')}")
-            lines.append("")
-            lines.append(f"  EVIDENCE:")
-            lines.append(f"    {f.get('evidence', 'N/A')}")
-            lines.append("")
-            lines.append(f"  EXPLANATION:")
-            for sentence in _wrap(f.get("explanation", ""), 65):
-                lines.append(f"    {sentence}")
-            lines.append("")
-            lines.append(f"  BUSINESS IMPACT:")
-            for sentence in _wrap(f.get("business_impact", ""), 65):
-                lines.append(f"    {sentence}")
-            lines.append("")
-            lines.append(f"  RECOMMENDED FIX:")
-            for sentence in _wrap(f.get("recommended_fix", ""), 65):
-                lines.append(f"    {sentence}")
-            lines.append("")
-            if f.get("false_positive_note"):
-                lines.append(f"  FALSE POSITIVE NOTE:")
-                lines.append(f"    {f.get('false_positive_note')}")
-            lines.append(thin)
-
-    # OWASP Reference
-    lines.append("\nOWASP TOP 10 REFERENCES")
-    lines.append(thin)
-    seen_owasp = set()
-    for f in findings:
-        owasp = f.get("owasp_category", "")
-        for code, url in OWASP_LINKS.items():
-            if code in owasp and code not in seen_owasp:
-                lines.append(f"  {owasp}")
-                lines.append(f"  {url}")
-                lines.append("")
-                seen_owasp.add(code)
+    _append_executive_summary(lines, executive_summary or {}, severity_label)
+    _append_top_recommendations(lines, top_recommendations)
+    _append_attack_timeline(lines, attack_timeline or [])
+    _append_rule_pre_scan(lines, rule_findings)
+    _append_detailed_findings(lines, findings)
+    _append_references(lines, findings, rule_findings)
 
     lines.append(sep)
     lines.append("DISCLAIMER")
     lines.append(thin)
     lines.append("This report was generated by SentinelAI for educational and defensive")
     lines.append("security purposes only. Findings are based on AI analysis and rule-based")
-    lines.append("detection and may include false positives. Always verify findings with a")
-    lines.append("qualified security professional before taking action.")
+    lines.append("detection and may include false positives. Validate findings before")
+    lines.append("production changes or incident response actions.")
     lines.append(sep)
 
     return "\n".join(lines)
+
 
 def save_text_report(content: str, prefix: str = "report") -> Path:
     filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
@@ -139,18 +92,186 @@ def save_text_report(content: str, prefix: str = "report") -> Path:
     path.write_text(content, encoding="utf-8")
     return path
 
+
+def _append_executive_summary(lines: list[str], executive_summary: dict, severity_label: str) -> None:
+    lines.append("EXECUTIVE SUMMARY")
+    lines.append("-" * 78)
+    if not executive_summary:
+        lines.append(f"Overall status: {severity_label}")
+        lines.append("No AI-generated executive summary is available for this analysis.")
+        lines.append("")
+        return
+
+    lines.append(f"Status: {executive_summary.get('overall_status', severity_label)}")
+    lines.append("")
+    for wrapped in _wrap(executive_summary.get("summary_paragraph", ""), 74):
+        lines.append(wrapped)
+    lines.append("")
+    lines.append(f"Top priority action: {executive_summary.get('top_priority_action', '')}")
+    lines.append("")
+    lines.append("Estimated business risk:")
+    for wrapped in _wrap(executive_summary.get("estimated_business_risk", ""), 74):
+        lines.append(f"  {wrapped}")
+    lines.append("")
+
+    steps = executive_summary.get("recommended_next_steps", [])
+    if steps:
+        lines.append("Prioritized next steps:")
+        for idx, step in enumerate(steps, 1):
+            lines.append(f"  {idx}. {step}")
+    lines.append("")
+
+
+def _append_top_recommendations(lines: list[str], recommendations: list[str]) -> None:
+    lines.append("TOP RECOMMENDATIONS")
+    lines.append("-" * 78)
+    if not recommendations:
+        lines.append("No prioritized recommendations were generated.")
+    else:
+        for idx, recommendation in enumerate(recommendations, 1):
+            lines.append(f"{idx}. {recommendation}")
+    lines.append("")
+
+
+def _append_attack_timeline(lines: list[str], attack_timeline: list[dict[str, Any]]) -> None:
+    if not attack_timeline:
+        return
+    lines.append("ATTACK TIMELINE")
+    lines.append("-" * 78)
+    for item in attack_timeline[:25]:
+        lines.append(
+            f"- {item.get('timestamp', 'unknown time')} | "
+            f"{item.get('source_ip', 'unknown ip')} | "
+            f"{item.get('threat_type', 'Unknown')} | "
+            f"{item.get('method', '')} {item.get('path', '')} | "
+            f"status={item.get('status', '')}"
+        )
+    lines.append("")
+
+
+def _append_rule_pre_scan(lines: list[str], rule_findings: list[dict[str, Any]]) -> None:
+    if not rule_findings:
+        return
+    lines.append("RULE-BASED PRE-SCAN SIGNALS")
+    lines.append("-" * 78)
+    for finding in rule_findings:
+        confidence = int(float(finding.get("rule_confidence", finding.get("confidence", 0)) or 0) * 100)
+        lines.append(
+            f"- {finding.get('threat_type', 'Unknown')}: "
+            f"{confidence}% confidence, pattern score {finding.get('pattern_score', 0)}, "
+            f"{finding.get('owasp_category', 'N/A')}, MITRE {finding.get('mitre_attack_summary', 'N/A')}"
+        )
+        indicators = finding.get("indicator_hits", [])
+        if indicators:
+            lines.append(f"  Indicators: {', '.join(indicators[:5])}")
+    lines.append("")
+
+
+def _append_detailed_findings(lines: list[str], findings: list[dict[str, Any]]) -> None:
+    lines.append("DETAILED FINDINGS")
+    lines.append("-" * 78)
+
+    if not findings:
+        lines.append("No threats detected in the final analysis.")
+        lines.append("")
+        return
+
+    for idx, finding in enumerate(findings, 1):
+        severity = finding.get("severity", "Unknown")
+        marker = SEVERITY_MARKERS.get(severity, "[WARN]")
+        confidence = int(float(finding.get("confidence", 0) or 0) * 100)
+        rule_conf = int(float(finding.get("rule_confidence", 0) or 0) * 100)
+
+        lines.append(f"[FINDING #{idx}] {marker} {finding.get('threat_type', 'Unknown')}")
+        lines.append(f"  Source      : {finding.get('analysis_source', 'Gemini AI')}")
+        lines.append(f"  Severity    : {severity}")
+        lines.append(f"  Confidence  : {confidence}% AI / {rule_conf}% rule")
+        lines.append(f"  OWASP       : {finding.get('owasp_category', 'N/A')}")
+        lines.append(f"  MITRE ATT&CK: {finding.get('mitre_attack_summary') or format_mitre_attack(finding.get('mitre_attack'))}")
+        lines.append("")
+
+        _append_wrapped_block(lines, "Evidence", finding.get("evidence", "N/A"))
+        _append_wrapped_block(lines, "Explanation", finding.get("explanation", ""))
+        _append_wrapped_block(lines, "Business Impact", finding.get("business_impact", ""))
+        _append_wrapped_block(lines, "Immediate Fix", finding.get("immediate_fix", ""))
+        _append_wrapped_block(lines, "Long-Term Fix", finding.get("long_term_fix", ""))
+        _append_wrapped_block(lines, "Recommended Fix", finding.get("recommended_fix", ""))
+
+        false_positive = finding.get("false_positive_note")
+        if false_positive:
+            _append_wrapped_block(lines, "False-Positive Note", false_positive)
+        lines.append("-" * 78)
+
+
+def _append_references(
+    lines: list[str],
+    findings: list[dict[str, Any]],
+    rule_findings: list[dict[str, Any]],
+) -> None:
+    combined = (findings or []) + (rule_findings or [])
+    if not combined:
+        return
+
+    lines.append("REFERENCES")
+    lines.append("-" * 78)
+
+    seen_owasp = set()
+    for finding in combined:
+        owasp = finding.get("owasp_category", "")
+        for code, url in OWASP_LINKS.items():
+            if code in owasp and code not in seen_owasp:
+                lines.append(f"OWASP {code}: {url}")
+                seen_owasp.add(code)
+
+    seen_mitre = set()
+    for finding in combined:
+        mappings = finding.get("mitre_attack", []) or []
+        if isinstance(mappings, dict):
+            mappings = [mappings]
+        if isinstance(mappings, str):
+            mappings = []
+        for mapping in mappings:
+            technique_id = mapping.get("technique_id") if isinstance(mapping, dict) else ""
+            if technique_id and technique_id not in seen_mitre:
+                lines.append(f"MITRE {technique_id}: {_mitre_url(technique_id)}")
+                seen_mitre.add(technique_id)
+    lines.append("")
+
+
+def _append_wrapped_block(lines: list[str], title: str, text: str) -> None:
+    lines.append(f"  {title}:")
+    if not text:
+        lines.append("    N/A")
+    else:
+        for wrapped in _wrap(str(text), 70):
+            lines.append(f"    {wrapped}")
+    lines.append("")
+
+
 def _wrap(text: str, width: int) -> list[str]:
-    """Simple word wrap."""
     if not text:
         return [""]
-    words = text.split()
-    lines, current = [], []
-    for word in words:
-        if sum(len(w) for w in current) + len(current) + len(word) > width:
-            lines.append(" ".join(current))
-            current = [word]
-        else:
-            current.append(word)
-    if current:
-        lines.append(" ".join(current))
-    return lines or [""]
+    wrapped_lines: list[str] = []
+    for paragraph in str(text).splitlines() or [""]:
+        words = paragraph.split()
+        if not words:
+            wrapped_lines.append("")
+            continue
+        current: list[str] = []
+        for word in words:
+            current_length = sum(len(item) for item in current) + max(len(current) - 1, 0)
+            if current and current_length + len(word) + 1 > width:
+                wrapped_lines.append(" ".join(current))
+                current = [word]
+            else:
+                current.append(word)
+        if current:
+            wrapped_lines.append(" ".join(current))
+    return wrapped_lines or [""]
+
+
+def _mitre_url(technique_id: str) -> str:
+    parts = technique_id.replace("T", "").split(".")
+    if len(parts) == 2:
+        return f"https://attack.mitre.org/techniques/T{parts[0]}/{parts[1]}/"
+    return f"https://attack.mitre.org/techniques/{technique_id}/"

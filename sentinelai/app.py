@@ -19,7 +19,13 @@ from gemini_client import (
     analyze_logs, analyze_code, generate_executive_summary,
     translate_to_turkish, test_api_key
 )
-from report_generator import build_text_report, save_text_report
+from report_generator import build_text_report
+from threat_knowledge import (
+    build_attack_timeline,
+    format_mitre_attack,
+    generate_top_recommendations,
+    merge_rule_and_gemini_findings,
+)
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 
@@ -258,6 +264,8 @@ def init_state():
         "last_risk_score": 0,
         "last_severity": "Clean",
         "last_exec_summary": {},
+        "last_top_recommendations": [],
+        "last_attack_timeline": [],
         "last_analysis_id": None,
         "last_analysis_type": "",
         "last_input_name": "",
@@ -281,7 +289,10 @@ def severity_badge(severity: str) -> str:
 def finding_card(f: dict, idx: int):
     sev = f.get("severity", "Unknown").lower()
     conf_pct = int(float(f.get("confidence", 0)) * 100)
+    rule_conf_pct = int(float(f.get("rule_confidence", 0) or 0) * 100)
     owasp = f.get("owasp_category", "")
+    mitre = f.get("mitre_attack_summary") or format_mitre_attack(f.get("mitre_attack"))
+    source = f.get("analysis_source", "Gemini AI")
     
     st.markdown(f"""
     <div class="finding-block {sev}">
@@ -298,7 +309,9 @@ def finding_card(f: dict, idx: int):
         </div>
       </div>
       <div style="color:#94A3B8; font-size:0.78rem; margin-bottom:8px">
-        📌 {owasp}
+        📌 {owasp}<br/>
+        MITRE ATT&CK: {mitre}<br/>
+        Source: {source} &nbsp;|&nbsp; Rule confidence: {rule_conf_pct}%
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -315,8 +328,10 @@ def finding_card(f: dict, idx: int):
         with col2:
             st.markdown("**Business Impact**")
             st.warning(f.get("business_impact", "Unknown"))
-            st.markdown("**Recommended Fix**")
-            st.success(f.get("recommended_fix", "No fix available."))
+            st.markdown("**Immediate Fix**")
+            st.success(f.get("immediate_fix") or f.get("recommended_fix", "No fix available."))
+            st.markdown("**Long-Term Fix**")
+            st.info(f.get("long_term_fix", "No long-term fix available."))
 
 def render_score_gauge(score: int, severity: str):
     color = get_severity_color(severity)
@@ -442,7 +457,7 @@ if "Home" in page:
           <li>🔍 Rule-based engine flags suspicious patterns</li>
           <li>🤖 Gemini performs deep contextual analysis</li>
           <li>📊 Risk score is computed (0–100 formula)</li>
-          <li>🗺️ Findings mapped to OWASP Top 10</li>
+          <li>🗺️ Findings mapped to OWASP Top 10 and MITRE ATT&CK</li>
           <li>📄 Download a full security report</li>
         </ol>
         </div>
@@ -457,6 +472,7 @@ if "Home" in page:
             "Brute Force": "A07:2021",
             "Hardcoded Credentials": "A02:2021",
             "Weak Cryptography": "A02:2021",
+            "Exposed Config Files": "A05:2021",
             "Sensitive File Access": "A05:2021",
             "Suspicious Scanner Tools": "A05:2021",
         }
@@ -586,13 +602,16 @@ elif "Analyze Logs" in page:
             st.markdown(f'<div class="status-bar">⚠️ {len(rule_findings)} THREAT PATTERN(S) DETECTED BY RULE ENGINE</div>',
                         unsafe_allow_html=True)
             for rf in rule_findings:
+                rule_conf_pct = int(float(rf.get("rule_confidence", rf.get("confidence", 0)) or 0) * 100)
+                mitre = rf.get("mitre_attack_summary") or format_mitre_attack(rf.get("mitre_attack"))
                 col_a, col_b = st.columns([3, 1])
                 with col_a:
                     st.markdown(
                         f'<div style="padding:8px 0; border-bottom:1px solid #1E2D40">'
                         f'<span style="color:#00E5FF;font-family:monospace">▶ {rf["threat_type"]}</span>'
                         f' &nbsp; <span style="color:#64748B;font-size:0.8rem">'
-                        f'{len(rf["matched_lines"])} line(s) flagged</span></div>',
+                        f'{len(rf["matched_lines"])} line(s) flagged - {rule_conf_pct}% confidence</span>'
+                        f'<br/><span style="color:#64748B;font-size:0.75rem">MITRE: {mitre}</span></div>',
                         unsafe_allow_html=True
                     )
                 with col_b:
@@ -602,6 +621,16 @@ elif "Analyze Logs" in page:
                     )
         else:
             st.success("✅ No suspicious patterns detected by rule engine.")
+
+        attack_timeline = build_attack_timeline(df, rule_findings)
+        if attack_timeline:
+            with st.expander("Attack Timeline", expanded=False):
+                timeline_df = pd.DataFrame(attack_timeline)
+                st.dataframe(
+                    timeline_df[["timestamp", "source_ip", "threat_type", "method", "path", "status"]],
+                    use_container_width=True,
+                    height=220
+                )
 
         st.markdown("---")
 
@@ -628,11 +657,13 @@ elif "Analyze Logs" in page:
                 flagged_content = get_flagged_content_for_gemini(rule_findings)
                 pre_labels = summarize_rule_findings(rule_findings)
 
-                findings = analyze_logs(
+                gemini_findings = analyze_logs(
                     flagged_content, pre_labels, st.session_state.api_key
                 )
+                findings = merge_rule_and_gemini_findings(gemini_findings, rule_findings)
 
                 risk_score, severity_label = compute_risk_score(findings, rule_findings)
+                top_recommendations = generate_top_recommendations(findings)
 
                 exec_summary = {}
                 if findings:
@@ -650,7 +681,9 @@ elif "Analyze Logs" in page:
                     severity_label=severity_label,
                     findings=findings,
                     executive_summary=json.dumps(exec_summary),
-                    language=st.session_state.language
+                    language=st.session_state.language,
+                    top_recommendations=top_recommendations,
+                    attack_timeline=attack_timeline
                 )
 
                 save_uploaded_file(
@@ -666,6 +699,8 @@ elif "Analyze Logs" in page:
                 st.session_state.last_risk_score = risk_score
                 st.session_state.last_severity = severity_label
                 st.session_state.last_exec_summary = exec_summary
+                st.session_state.last_top_recommendations = top_recommendations
+                st.session_state.last_attack_timeline = attack_timeline
                 st.session_state.last_analysis_id = analysis_id
                 st.session_state.last_analysis_type = "log"
                 st.session_state.last_input_name = log_filename
@@ -727,11 +762,14 @@ elif "Analyze Code" in page:
                 unsafe_allow_html=True
             )
             for rf in rule_findings:
+                rule_conf_pct = int(float(rf.get("rule_confidence", rf.get("confidence", 0)) or 0) * 100)
+                mitre = rf.get("mitre_attack_summary") or format_mitre_attack(rf.get("mitre_attack"))
                 st.markdown(
                     f'<div style="padding:8px 0; border-bottom:1px solid #1E2D40">'
                     f'<span style="color:#FF6B35;font-family:monospace">▶ {rf["threat_type"]}</span>'
                     f' — <span style="color:#64748B;font-size:0.8rem">'
-                    f'{rf["owasp_category"]}</span></div>',
+                    f'{rf["owasp_category"]} - {rule_conf_pct}% confidence</span>'
+                    f'<br/><span style="color:#64748B;font-size:0.75rem">MITRE: {mitre}</span></div>',
                     unsafe_allow_html=True
                 )
         else:
@@ -748,10 +786,12 @@ elif "Analyze Code" in page:
         if analyze_btn and st.session_state.api_key_valid:
             with st.spinner("🤖 Gemini is reviewing your code for vulnerabilities..."):
                 pre_labels = summarize_rule_findings(rule_findings)
-                findings = analyze_code(
+                gemini_findings = analyze_code(
                     code_input, language, pre_labels, st.session_state.api_key
                 )
+                findings = merge_rule_and_gemini_findings(gemini_findings, rule_findings)
                 risk_score, severity_label = compute_risk_score(findings, rule_findings)
+                top_recommendations = generate_top_recommendations(findings)
 
                 exec_summary = {}
                 if findings:
@@ -767,7 +807,9 @@ elif "Analyze Code" in page:
                     severity_label=severity_label,
                     findings=findings,
                     executive_summary=json.dumps(exec_summary),
-                    language=st.session_state.language
+                    language=st.session_state.language,
+                    top_recommendations=top_recommendations,
+                    attack_timeline=[]
                 )
 
                 st.session_state.last_findings = findings
@@ -775,6 +817,8 @@ elif "Analyze Code" in page:
                 st.session_state.last_risk_score = risk_score
                 st.session_state.last_severity = severity_label
                 st.session_state.last_exec_summary = exec_summary
+                st.session_state.last_top_recommendations = top_recommendations
+                st.session_state.last_attack_timeline = []
                 st.session_state.last_analysis_id = analysis_id
                 st.session_state.last_analysis_type = "code"
                 st.session_state.last_input_name = code_filename
@@ -795,6 +839,8 @@ elif "Results" in page:
         severity = st.session_state.last_severity
         exec_summary = st.session_state.last_exec_summary
         rule_findings = st.session_state.last_rule_findings
+        top_recommendations = st.session_state.last_top_recommendations
+        attack_timeline = st.session_state.last_attack_timeline
 
         # Top summary bar
         col_score, col_info, col_actions = st.columns([2, 4, 2])
@@ -815,7 +861,7 @@ elif "Results" in page:
             col_b.metric("Avg Confidence",
                          f"{int(breakdown.get('avg_gemini_confidence', 0)*100)}%")
             col_c.metric("Flagged Lines", breakdown.get("flagged_lines_count", 0))
-            col_d.metric("Rule Triggers", breakdown.get("rule_threats_detected", 0))
+            col_d.metric("Rule Confidence", f"{int(breakdown.get('avg_rule_confidence', 0)*100)}%")
 
             # Severity distribution bar
             sev_dist = breakdown.get("severity_distribution", {})
@@ -841,7 +887,10 @@ elif "Results" in page:
                 report_text = build_text_report(
                     st.session_state.last_analysis_type,
                     st.session_state.last_input_name,
-                    risk_score, severity, findings, exec_summary
+                    risk_score, severity, findings, exec_summary,
+                    rule_findings=rule_findings,
+                    attack_timeline=attack_timeline,
+                    top_recommendations=top_recommendations
                 )
                 st.download_button(
                     "⬇️ Download .txt",
@@ -852,15 +901,28 @@ elif "Results" in page:
                 )
 
             if st.button("🗑️ Clear Results", use_container_width=True):
-                for k in ["last_findings","last_risk_score","last_severity",
-                          "last_exec_summary","last_rule_findings","last_input_name"]:
-                    st.session_state[k] = [] if "findings" in k else ({} if "summary" in k else (0 if "score" in k else ""))
+                for k in [
+                    "last_findings", "last_rule_findings", "last_top_recommendations",
+                    "last_attack_timeline"
+                ]:
+                    st.session_state[k] = []
+                st.session_state.last_risk_score = 0
+                st.session_state.last_severity = "Clean"
+                st.session_state.last_exec_summary = {}
+                st.session_state.last_input_name = ""
                 st.rerun()
 
         st.markdown("---")
 
         # Tabs
-        tab1, tab2, tab3 = st.tabs(["🎯 Threat Findings", "📋 Executive Summary", "🗺️ OWASP Map"])
+        tab1, tab_rec, tab2, tab_mitre, tab3, tab_timeline = st.tabs([
+            "🎯 Threat Findings",
+            "✅ Top Recommendations",
+            "📋 Executive Summary",
+            "🧭 MITRE ATT&CK",
+            "🗺️ OWASP Map",
+            "⏱️ Attack Timeline"
+        ])
 
         with tab1:
             if not findings:
@@ -884,9 +946,15 @@ elif "Results" in page:
                                     for s in steps:
                                         st.markdown(f"  • {s}")
 
+        with tab_rec:
+            if top_recommendations:
+                for i, recommendation in enumerate(top_recommendations, 1):
+                    st.markdown(f"**{i}.** {recommendation}")
+            else:
+                st.info("No prioritized recommendations available.")
+
         with tab2:
             if exec_summary:
-                status = exec_summary.get("overall_status", severity)
                 st.markdown(
                     f'<div class="sentinel-card">'
                     f'<h3 style="font-family:Space Mono;color:#00E5FF;margin-top:0">Executive Summary</h3>'
@@ -909,6 +977,26 @@ elif "Results" in page:
             else:
                 st.info("Executive summary not available.")
 
+        with tab_mitre:
+            mitre_map = {}
+            for f in findings:
+                for mapping in f.get("mitre_attack", []) or []:
+                    if not isinstance(mapping, dict):
+                        continue
+                    label = f'{mapping.get("technique_id", "")} {mapping.get("technique", "")}'.strip()
+                    tactic = mapping.get("tactic", "Unknown tactic")
+                    mitre_map.setdefault(label or "Unknown", {"tactic": tactic, "threats": []})
+                    mitre_map[label or "Unknown"]["threats"].append(f.get("threat_type", "Unknown"))
+
+            if mitre_map:
+                for label, data in mitre_map.items():
+                    with st.expander(f"{label} ({data['tactic']})", expanded=True):
+                        for threat in sorted(set(data["threats"])):
+                            st.markdown(f"- {threat}")
+                        st.caption("Reference: https://attack.mitre.org/")
+            else:
+                st.info("No MITRE ATT&CK mappings available.")
+
         with tab3:
             owasp_map = {}
             for f in findings:
@@ -917,13 +1005,27 @@ elif "Results" in page:
 
             if owasp_map:
                 for cat, threats in owasp_map.items():
-                    code_prefix = cat[:8] if len(cat) >= 8 else cat
                     with st.expander(f"📌 {cat}", expanded=True):
                         for t in threats:
                             st.markdown(f"  ⚔️ {t}")
                         st.caption(f"Reference: https://owasp.org/Top10/")
             else:
                 st.info("No OWASP mappings available.")
+
+        with tab_timeline:
+            if attack_timeline:
+                timeline_df = pd.DataFrame(attack_timeline)
+                st.dataframe(
+                    timeline_df[["timestamp", "source_ip", "threat_type", "method", "path", "status"]],
+                    use_container_width=True,
+                    height=320
+                )
+                with st.expander("Timeline Evidence", expanded=False):
+                    for item in attack_timeline[:10]:
+                        st.markdown(f'**{item.get("timestamp", "unknown")} - {item.get("threat_type", "Unknown")}**')
+                        st.code(item.get("evidence", ""), language="text")
+            else:
+                st.info("No timestamped attack timeline available for this analysis.")
 
 # ─── Page: History ────────────────────────────────────────────────────────────
 
@@ -982,11 +1084,19 @@ elif "History" in page:
 
                     # Quick report download
                     detail2 = get_analysis_detail(a["id"])
+                    analysis_meta = detail2.get("analysis", {})
+                    try:
+                        stored_summary = json.loads(analysis_meta.get("executive_summary") or "{}")
+                    except json.JSONDecodeError:
+                        stored_summary = {}
                     report_text = build_text_report(
                         a.get("analysis_type",""),
                         fname, score, sev,
                         detail2.get("findings", []),
-                        {}
+                        stored_summary,
+                        rule_findings=[],
+                        attack_timeline=analysis_meta.get("attack_timeline", []),
+                        top_recommendations=analysis_meta.get("top_recommendations", [])
                     )
                     st.download_button(
                         "📄 Export",
@@ -1008,6 +1118,9 @@ elif "Reports" in page:
         risk_score = st.session_state.last_risk_score
         severity = st.session_state.last_severity
         exec_summary = st.session_state.last_exec_summary
+        rule_findings = st.session_state.last_rule_findings
+        top_recommendations = st.session_state.last_top_recommendations
+        attack_timeline = st.session_state.last_attack_timeline
 
         st.markdown("### 📊 Current Analysis Summary")
         col1, col2, col3 = st.columns(3)
@@ -1022,7 +1135,10 @@ elif "Reports" in page:
             st.session_state.last_analysis_type,
             st.session_state.last_input_name,
             risk_score, severity, findings, exec_summary,
-            language=st.session_state.language
+            language=st.session_state.language,
+            rule_findings=rule_findings,
+            attack_timeline=attack_timeline,
+            top_recommendations=top_recommendations
         )
 
         st.text_area("Report Preview", value=report_text[:3000] + "\n...", height=400,
@@ -1045,6 +1161,8 @@ elif "Reports" in page:
             "severity": severity,
             "findings": findings,
             "executive_summary": exec_summary,
+            "top_recommendations": top_recommendations,
+            "attack_timeline": attack_timeline,
             "exported_at": datetime.now().isoformat()
         }, indent=2, ensure_ascii=False)
 
