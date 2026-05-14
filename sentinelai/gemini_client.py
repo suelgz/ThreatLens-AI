@@ -1,15 +1,23 @@
+from __future__ import annotations
+
 import json
 import re
+
 from google import genai
 from google.genai import types
 
+from threat_knowledge import enrich_finding
+
+
 MODEL_NAME = "gemini-2.0-flash"
+
 
 def _get_client(api_key: str):
     return genai.Client(api_key=api_key)
 
+
 def _extract_json(text: str):
-    """Robustly extract JSON from Gemini output even if it wraps in markdown fences."""
+    """Extract JSON from Gemini output even when wrapped in markdown fences."""
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
@@ -22,10 +30,11 @@ def _extract_json(text: str):
             end = text.rfind(end_char)
             if start != -1 and end != -1:
                 try:
-                    return json.loads(text[start:end+1])
+                    return json.loads(text[start:end + 1])
                 except json.JSONDecodeError:
                     continue
     return None
+
 
 LOG_ANALYSIS_PROMPT = """You are SentinelAI, a senior cybersecurity analyst embedded in a threat detection system.
 
@@ -40,27 +49,35 @@ PRE-DETECTION LABELS (from rule-based filter):
 Perform deep analysis and return a structured JSON array. Each element is one threat finding.
 
 RULES:
-- Respond ONLY with valid JSON array. No markdown, no extra text.
-- If no real threats, return: []
-- Quote exact suspicious log entry in evidence field.
+- Respond ONLY with a valid JSON array. No markdown, no extra text.
+- If no real threats exist, return: []
+- Quote the exact suspicious log entry in evidence.
 - Explanation must be understandable by a junior analyst.
-- recommended_fix must be practical and specific.
+- Include OWASP Top 10 and MITRE ATT&CK mapping.
+- Split remediation into immediate_fix and long_term_fix.
+- recommended_fix may summarize both fixes, but do not omit the split fields.
 
 Return exactly this structure:
 [
   {{
     "threat_detected": true,
-    "threat_type": "SQL Injection | XSS | Brute Force | Path Traversal | Command Injection | Suspicious User-Agent | Sensitive File Access | Other",
+    "threat_type": "SQL Injection | XSS | Brute Force | Path Traversal | Command Injection | Suspicious User-Agent | Exposed Config Files | Sensitive File Access | Other",
     "severity": "Critical | High | Medium | Low | Informational",
     "confidence": 0.0,
     "evidence": "exact log line that triggered this",
     "explanation": "clear explanation of what this attack is and why it is dangerous",
     "owasp_category": "A03:2021 - Injection",
-    "recommended_fix": "specific steps to block or mitigate this threat",
+    "mitre_attack": [
+      {{"technique_id": "T1190", "technique": "Exploit Public-Facing Application", "tactic": "Initial Access"}}
+    ],
+    "immediate_fix": "urgent containment or code/config fix to apply now",
+    "long_term_fix": "durable engineering or process improvement",
+    "recommended_fix": "short combined remediation summary",
     "business_impact": "what damage could occur if this attack succeeds",
     "false_positive_note": "when this might be a false positive"
   }}
 ]"""
+
 
 CODE_ANALYSIS_PROMPT = """You are SentinelAI, a senior application security engineer specializing in OWASP vulnerabilities.
 
@@ -75,27 +92,35 @@ PRE-DETECTED PATTERNS (from static analysis):
 {pre_labels}
 
 RULES:
-- Respond ONLY with valid JSON array. No markdown, no extra text outside JSON.
+- Respond ONLY with a valid JSON array. No markdown, no extra text outside JSON.
 - Each vulnerability is a separate object in the array.
 - Include exact vulnerable line(s) in evidence.
-- recommended_fix must include a corrected code example where possible.
+- Include OWASP Top 10 and MITRE ATT&CK mapping.
+- Split remediation into immediate_fix and long_term_fix.
+- recommended_fix must include corrected code or specific fix instructions where possible.
 - If code is secure, return: []
 
 Return exactly this structure:
 [
   {{
     "threat_detected": true,
-    "threat_type": "SQL Injection | XSS | CSRF | Command Injection | Path Traversal | Hardcoded Credentials | Insecure Deserialization | Weak Cryptography | Broken Auth | Other",
+    "threat_type": "SQL Injection | XSS | CSRF | Command Injection | Path Traversal | Hardcoded Credentials | Weak Cryptography | Broken Auth | Other",
     "severity": "Critical | High | Medium | Low | Informational",
     "confidence": 0.0,
     "evidence": "exact vulnerable line(s) from the code",
     "explanation": "why this code is vulnerable and how an attacker could exploit it",
     "owasp_category": "A03:2021 - Injection",
+    "mitre_attack": [
+      {{"technique_id": "T1059", "technique": "Command and Scripting Interpreter", "tactic": "Execution"}}
+    ],
+    "immediate_fix": "specific safe code or configuration change to make now",
+    "long_term_fix": "durable secure coding or architecture improvement",
     "recommended_fix": "corrected code or specific fix instructions",
     "business_impact": "real-world consequence if this vulnerability is exploited",
     "false_positive_note": "conditions under which this would actually be safe"
   }}
 ]"""
+
 
 EXECUTIVE_SUMMARY_PROMPT = """You are SentinelAI generating an executive security report for a non-technical business audience.
 
@@ -108,9 +133,10 @@ SEVERITY LABEL: {severity_label}
 Write a clear executive summary that a CEO or business manager can act on.
 
 RULES:
-- Respond ONLY with valid JSON object. No markdown, no text outside JSON.
+- Respond ONLY with a valid JSON object. No markdown, no text outside JSON.
 - Use plain language. Avoid jargon.
 - Be honest about risk level.
+- Recommended next steps must be prioritized by business risk.
 
 Return exactly this structure:
 {{
@@ -122,7 +148,8 @@ Return exactly this structure:
   "recommended_next_steps": ["step 1", "step 2", "step 3"]
 }}"""
 
-TURKISH_EXPLANATION_PROMPT = """Sen SentinelAI'sin. Teknik bilgisi olmayan kullanicilaratilgisiz Turk dili ile siber guvenlik analizi yapan bir asistansin.
+
+TURKISH_EXPLANATION_PROMPT = """Sen SentinelAI'sin. Teknik bilgisi olmayan kullanicilara sade Turkce ile siber guvenlik analizi yapan bir asistansin.
 
 Asagidaki teknik guvenlik bulgusunu Turkce olarak acikla. Hedef kitle: kucuk isletme sahibi veya teknik olmayan yonetici.
 
@@ -136,8 +163,9 @@ Bu yapiyi dondur:
 {{
   "basit_aciklama": "Teknik olmayan birinin anlayacagi sade Turkce aciklama",
   "tehlike_seviyesi": "Kritik | Yuksek | Orta | Dusuk",
-  "ne_olabilir": "Bu acik kotüye kullanilirsa ne olur (somut senaryo)",
+  "ne_olabilir": "Bu acik kotuye kullanilirsa ne olur",
   "hemen_yapilacaklar": ["adim 1", "adim 2", "adim 3"],
+  "uzun_vadeli_cozum": ["adim 1", "adim 2"],
   "is_etkisi": "Bu guvenlik acigi isletmenize nasil zarar verebilir"
 }}"""
 
@@ -150,92 +178,109 @@ def _call_gemini(api_key: str, prompt: str) -> str:
         config=types.GenerateContentConfig(
             temperature=0.1,
             max_output_tokens=4096,
-        )
+        ),
     )
     return response.text
 
 
 def analyze_logs(log_content: str, pre_labels: str, api_key: str) -> list:
     prompt = LOG_ANALYSIS_PROMPT.format(
-        log_content=log_content[:4000],
-        pre_labels=pre_labels
+        log_content=log_content[:5000],
+        pre_labels=pre_labels,
     )
     try:
         text = _call_gemini(api_key, prompt)
         result = _extract_json(text)
-        return result if isinstance(result, list) else []
-    except Exception as e:
-        return [_error_finding(str(e))]
+        return _enrich_result(result) if isinstance(result, list) else []
+    except Exception as exc:
+        return [_error_finding(str(exc))]
 
 
 def analyze_code(code_snippet: str, language: str, pre_labels: str, api_key: str) -> list:
     prompt = CODE_ANALYSIS_PROMPT.format(
         language=language,
-        code_snippet=code_snippet[:4000],
-        pre_labels=pre_labels
+        code_snippet=code_snippet[:5000],
+        pre_labels=pre_labels,
     )
     try:
         text = _call_gemini(api_key, prompt)
         result = _extract_json(text)
-        return result if isinstance(result, list) else []
-    except Exception as e:
-        return [_error_finding(str(e))]
+        return _enrich_result(result) if isinstance(result, list) else []
+    except Exception as exc:
+        return [_error_finding(str(exc))]
 
 
 def generate_executive_summary(findings: list, risk_score: int, severity_label: str, api_key: str) -> dict:
     prompt = EXECUTIVE_SUMMARY_PROMPT.format(
-        findings_json=json.dumps(findings, indent=2)[:3000],
+        findings_json=json.dumps(findings, indent=2)[:3500],
         risk_score=risk_score,
-        severity_label=severity_label
+        severity_label=severity_label,
     )
     try:
         text = _call_gemini(api_key, prompt)
         result = _extract_json(text)
         return result if isinstance(result, dict) else _default_summary(severity_label)
-    except Exception as e:
-        return _default_summary(severity_label, str(e))
+    except Exception as exc:
+        return _default_summary(severity_label, str(exc))
 
 
 def translate_to_turkish(finding: dict, api_key: str) -> dict:
     prompt = TURKISH_EXPLANATION_PROMPT.format(
-        technical_finding=json.dumps(finding, indent=2, ensure_ascii=False)[:2000]
+        technical_finding=json.dumps(finding, indent=2, ensure_ascii=False)[:2500]
     )
     try:
         text = _call_gemini(api_key, prompt)
         result = _extract_json(text)
         return result if isinstance(result, dict) else {}
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 def test_api_key(api_key: str) -> tuple:
     try:
         client = _get_client(api_key)
-        resp = client.models.generate_content(
+        response = client.models.generate_content(
             model=MODEL_NAME,
-            contents="Reply with the single word: OK"
+            contents="Reply with the single word: OK",
         )
-        return True, resp.text.strip()
-    except Exception as e:
-        return False, str(e)
+        return True, response.text.strip()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _enrich_result(result: list) -> list:
+    return [
+        enrich_finding(item)
+        for item in result
+        if isinstance(item, dict)
+    ]
 
 
 def _error_finding(error_msg: str) -> dict:
-    return {
-        "threat_detected": False, "threat_type": "API Error",
-        "severity": "Unknown", "confidence": 0,
-        "evidence": "", "explanation": f"Gemini API error: {error_msg}",
-        "owasp_category": "", "recommended_fix": "Check your API key and try again.",
-        "business_impact": "", "false_positive_note": ""
-    }
+    return enrich_finding({
+        "threat_detected": False,
+        "threat_type": "Other",
+        "severity": "Unknown",
+        "confidence": 0,
+        "evidence": "",
+        "explanation": f"Gemini API error: {error_msg}",
+        "recommended_fix": "Check your API key, network access, and Gemini quota, then try again.",
+        "business_impact": "AI enrichment was unavailable, so rule-based findings should be reviewed manually.",
+        "false_positive_note": "This is an API error marker, not a security finding.",
+    })
 
 
 def _default_summary(severity_label: str, error: str = "") -> dict:
+    suffix = f" {error}" if error else ""
     return {
         "overall_status": severity_label,
-        "summary_paragraph": f"Analysis completed with severity: {severity_label}. {error}",
-        "top_priority_action": "Review findings in detail.",
-        "estimated_business_risk": "Unknown — please review manually.",
-        "positive_notes": "",
-        "recommended_next_steps": ["Review all findings", "Consult a security professional"]
+        "summary_paragraph": f"Analysis completed with severity: {severity_label}.{suffix}",
+        "top_priority_action": "Review the highest-risk findings and apply the immediate fixes first.",
+        "estimated_business_risk": "Business risk depends on whether the suspicious activity reached sensitive systems.",
+        "positive_notes": "Rule-based detection and structured reporting completed successfully.",
+        "recommended_next_steps": [
+            "Validate the top findings",
+            "Apply immediate containment fixes",
+            "Plan the long-term remediation work",
+        ],
     }
