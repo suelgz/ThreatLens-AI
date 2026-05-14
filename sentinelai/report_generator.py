@@ -1,0 +1,156 @@
+from datetime import datetime
+from pathlib import Path
+import json
+
+EXPORTS_DIR = Path(__file__).parent / "exports"
+EXPORTS_DIR.mkdir(exist_ok=True)
+
+SEVERITY_EMOJI = {
+    "Critical": "🔴",
+    "High": "🟠",
+    "Medium": "🟡",
+    "Low": "🟢",
+    "Informational": "🔵",
+    "Clean": "✅"
+}
+
+OWASP_LINKS = {
+    "A01:2021": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
+    "A02:2021": "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/",
+    "A03:2021": "https://owasp.org/Top10/A03_2021-Injection/",
+    "A04:2021": "https://owasp.org/Top10/A04_2021-Insecure_Design/",
+    "A05:2021": "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/",
+    "A06:2021": "https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/",
+    "A07:2021": "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/",
+    "A08:2021": "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/",
+    "A09:2021": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/",
+    "A10:2021": "https://owasp.org/Top10/A10_2021-Server_Side_Request_Forgery/",
+}
+
+def build_text_report(
+    analysis_type: str,
+    input_name: str,
+    risk_score: int,
+    severity_label: str,
+    findings: list[dict],
+    executive_summary: dict = None,
+    language: str = "en"
+) -> str:
+    lines = []
+    sep = "=" * 70
+    thin = "-" * 70
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    emoji = SEVERITY_EMOJI.get(severity_label, "⚠️")
+
+    lines.append(sep)
+    lines.append("          SENTINELAI — SECURITY ANALYSIS REPORT")
+    lines.append(sep)
+    lines.append(f"  Generated     : {now}")
+    lines.append(f"  Analysis Type : {analysis_type.upper()}")
+    lines.append(f"  Source        : {input_name}")
+    lines.append(f"  Risk Score    : {risk_score}/100")
+    lines.append(f"  Severity      : {emoji} {severity_label}")
+    lines.append(f"  Findings      : {len(findings)}")
+    lines.append(sep)
+    lines.append("")
+
+    # Executive Summary
+    if executive_summary:
+        lines.append("EXECUTIVE SUMMARY")
+        lines.append(thin)
+        lines.append(f"Status : {executive_summary.get('overall_status', severity_label)}")
+        lines.append("")
+        lines.append(executive_summary.get("summary_paragraph", ""))
+        lines.append("")
+        lines.append(f"TOP PRIORITY: {executive_summary.get('top_priority_action', '')}")
+        lines.append("")
+        lines.append(f"BUSINESS RISK: {executive_summary.get('estimated_business_risk', '')}")
+        lines.append("")
+        steps = executive_summary.get("recommended_next_steps", [])
+        if steps:
+            lines.append("Recommended Next Steps:")
+            for i, step in enumerate(steps, 1):
+                lines.append(f"  {i}. {step}")
+        lines.append("")
+
+    # Detailed Findings
+    lines.append("DETAILED FINDINGS")
+    lines.append(thin)
+
+    if not findings:
+        lines.append("No threats detected. System appears clean based on available data.")
+    else:
+        for idx, f in enumerate(findings, 1):
+            sev = f.get("severity", "Unknown")
+            sev_emoji = SEVERITY_EMOJI.get(sev, "⚠️")
+            conf = int(float(f.get("confidence", 0)) * 100)
+
+            lines.append(f"\n[FINDING #{idx}]  {sev_emoji} {f.get('threat_type', 'Unknown')}")
+            lines.append(f"  Severity    : {sev}  |  Confidence: {conf}%")
+            lines.append(f"  OWASP       : {f.get('owasp_category', 'N/A')}")
+            lines.append("")
+            lines.append(f"  EVIDENCE:")
+            lines.append(f"    {f.get('evidence', 'N/A')}")
+            lines.append("")
+            lines.append(f"  EXPLANATION:")
+            for sentence in _wrap(f.get("explanation", ""), 65):
+                lines.append(f"    {sentence}")
+            lines.append("")
+            lines.append(f"  BUSINESS IMPACT:")
+            for sentence in _wrap(f.get("business_impact", ""), 65):
+                lines.append(f"    {sentence}")
+            lines.append("")
+            lines.append(f"  RECOMMENDED FIX:")
+            for sentence in _wrap(f.get("recommended_fix", ""), 65):
+                lines.append(f"    {sentence}")
+            lines.append("")
+            if f.get("false_positive_note"):
+                lines.append(f"  FALSE POSITIVE NOTE:")
+                lines.append(f"    {f.get('false_positive_note')}")
+            lines.append(thin)
+
+    # OWASP Reference
+    lines.append("\nOWASP TOP 10 REFERENCES")
+    lines.append(thin)
+    seen_owasp = set()
+    for f in findings:
+        owasp = f.get("owasp_category", "")
+        for code, url in OWASP_LINKS.items():
+            if code in owasp and code not in seen_owasp:
+                lines.append(f"  {owasp}")
+                lines.append(f"  {url}")
+                lines.append("")
+                seen_owasp.add(code)
+
+    lines.append(sep)
+    lines.append("DISCLAIMER")
+    lines.append(thin)
+    lines.append("This report was generated by SentinelAI for educational and defensive")
+    lines.append("security purposes only. Findings are based on AI analysis and rule-based")
+    lines.append("detection and may include false positives. Always verify findings with a")
+    lines.append("qualified security professional before taking action.")
+    lines.append(sep)
+
+    return "\n".join(lines)
+
+def save_text_report(content: str, prefix: str = "report") -> Path:
+    filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    path = EXPORTS_DIR / filename
+    path.write_text(content, encoding="utf-8")
+    return path
+
+def _wrap(text: str, width: int) -> list[str]:
+    """Simple word wrap."""
+    if not text:
+        return [""]
+    words = text.split()
+    lines, current = [], []
+    for word in words:
+        if sum(len(w) for w in current) + len(current) + len(word) > width:
+            lines.append(" ".join(current))
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current))
+    return lines or [""]
