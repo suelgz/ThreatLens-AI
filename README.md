@@ -1,12 +1,12 @@
-# SentinelAI
+# ThreatLens AI
 
-SentinelAI is a Streamlit-based cybersecurity analysis assistant that helps review uploaded logs and source code for common attack patterns. It combines deterministic rule-based detection with Gemini-powered analysis, then produces risk scoring, OWASP Top 10 mapping, MITRE ATT&CK mapping, remediation guidance, history storage, and exportable reports.
+ThreatLens AI is a Streamlit-based cybersecurity analysis assistant that helps review uploaded logs and source code for common attack patterns. It combines deterministic rule-based detection with Gemini-powered analysis, then produces risk scoring, OWASP Top 10 mapping, MITRE ATT&CK mapping, remediation guidance, history storage, and exportable reports.
 
 The project is designed for defensive security review, education, demos, and early triage. It does not perform live network scanning or exploitation.
 
-## What SentinelAI Does
+## What ThreatLens AI Does
 
-SentinelAI accepts a log file or code snippet and runs a two-stage analysis pipeline:
+ThreatLens AI accepts a log file or code snippet and runs a two-stage analysis pipeline:
 
 1. Rule engine pre-scan flags suspicious evidence with regex and frequency-based detections.
 2. Gemini performs contextual analysis on the flagged evidence.
@@ -54,7 +54,10 @@ sentinelai/
 - Composite risk score from 0 to 100
 - SQLite analysis history
 - Exportable text and JSON reports
-- English/Turkish explanation support
+- English/Turkish UI labels, report labels, and explanation support
+- Demo Mode for loading sample logs without uploading a file
+- Gemini API key status messaging and local/Gemini readiness indicator
+- Mobile-friendly sidebar and layout adjustments
 
 ## How To Run
 
@@ -78,11 +81,11 @@ Then open the Streamlit URL shown in the terminal and paste your Gemini API key 
 
 ## Gemini API Key
 
-SentinelAI uses Gemini for contextual analysis and executive summaries.
+ThreatLens AI uses Gemini for contextual analysis and executive summaries.
 
 1. Visit Google AI Studio.
 2. Create a Gemini API key.
-3. Paste the key into the SentinelAI sidebar.
+3. Paste the key into the ThreatLens AI sidebar.
 4. Click the validation button before running Gemini analysis.
 
 The rule engine can still show pre-scan signals, confidence, MITRE mapping, and remediation context before AI analysis.
@@ -115,7 +118,7 @@ Exported reports include:
 
 ## Ethical Notice
 
-SentinelAI is intended only for defensive, educational, and authorized security analysis.
+ThreatLens AI is intended only for defensive, educational, and authorized security analysis.
 
 - Only analyze logs, code, and systems you own or have explicit permission to assess.
 - Do not use this project to attack, scan, or exploit third-party systems.

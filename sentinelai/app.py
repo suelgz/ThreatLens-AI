@@ -19,6 +19,7 @@ from gemini_client import (
     analyze_logs, analyze_code, generate_executive_summary,
     translate_to_turkish, test_api_key
 )
+from i18n import APP_NAME, translate_text
 from report_generator import build_text_report
 from threat_knowledge import (
     build_attack_timeline,
@@ -30,7 +31,7 @@ from threat_knowledge import (
 # ─── Page Config ──────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="SentinelAI",
+    page_title=APP_NAME,
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -151,6 +152,19 @@ st.markdown("""
   .badge-info     { background: rgba(59,130,246,0.15); color: #3B82F6; border: 1px solid #3B82F6; }
   .badge-clean    { background: rgba(34,197,94,0.15);  color: #22C55E; border: 1px solid #22C55E; }
 
+  .confidence-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid #1E2D40;
+    background: #0A0E1A;
+    color: #94A3B8;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.68rem;
+    margin-left: 6px;
+    white-space: nowrap;
+  }
+
   /* Score ring placeholder */
   .score-display {
     font-family: 'Space Mono', monospace;
@@ -250,6 +264,49 @@ st.markdown("""
     letter-spacing: 3px;
     text-transform: uppercase;
   }
+
+  @media (max-width: 768px) {
+    .block-container {
+      padding-left: 1rem !important;
+      padding-right: 1rem !important;
+    }
+
+    section[data-testid="stSidebar"] {
+      width: min(88vw, 22rem) !important;
+    }
+
+    .logo-title {
+      font-size: 1.25rem;
+      letter-spacing: 1px;
+    }
+
+    .logo-sub {
+      font-size: 0.68rem;
+      letter-spacing: 1.5px;
+    }
+
+    [data-testid="column"] {
+      width: 100% !important;
+      flex: 1 1 100% !important;
+      min-width: 100% !important;
+    }
+
+    .finding-block {
+      padding: 12px;
+    }
+
+    .stButton > button,
+    .stDownloadButton > button {
+      width: 100% !important;
+      min-height: 42px;
+      white-space: normal !important;
+    }
+
+    .badge,
+    .confidence-badge {
+      margin-top: 4px;
+    }
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -270,6 +327,9 @@ def init_state():
         "last_analysis_type": "",
         "last_input_name": "",
         "language": "en",
+        "api_key_error": "",
+        "demo_log_loaded": False,
+        "page": "home",
         "analyzing": False,
     }
     for k, v in defaults.items():
@@ -281,6 +341,9 @@ init_state()
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 SAMPLE_DATA_DIR = Path(__file__).parent / "sample_data"
+
+def t(key: str, **kwargs) -> str:
+    return translate_text(key, st.session_state.get("language", "en"), **kwargs)
 
 def severity_badge(severity: str) -> str:
     cls = severity.lower() if severity.lower() in ["critical","high","medium","low","clean"] else "info"
@@ -302,36 +365,34 @@ def finding_card(f: dict, idx: int):
         </span>
         <div>
           {severity_badge(f.get('severity','Unknown'))}
-          &nbsp;
-          <span style="color:#64748B; font-size:0.78rem; font-family:'Space Mono',monospace">
-            {conf_pct}% confidence
-          </span>
+          <span class="confidence-badge">{t('ai_confidence')} {conf_pct}%</span>
+          <span class="confidence-badge">{t('rule_confidence_short')} {rule_conf_pct}%</span>
         </div>
       </div>
       <div style="color:#94A3B8; font-size:0.78rem; margin-bottom:8px">
         📌 {owasp}<br/>
         MITRE ATT&CK: {mitre}<br/>
-        Source: {source} &nbsp;|&nbsp; Rule confidence: {rule_conf_pct}%
+        {t('source_label')}: {source}
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    with st.expander("📋 Evidence & Analysis", expanded=(idx == 1)):
+    with st.expander(f"📋 {t('evidence_analysis')}", expanded=(idx == 1)):
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("**Evidence**")
+            st.markdown(f"**{t('evidence')}**")
             st.markdown(f'<div class="evidence-code">{f.get("evidence","N/A")}</div>', unsafe_allow_html=True)
-            st.markdown("**Explanation**")
+            st.markdown(f"**{t('explanation')}**")
             st.write(f.get("explanation", ""))
-            st.markdown("**False Positive Note**")
-            st.caption(f.get("false_positive_note", "None noted."))
+            st.markdown(f"**{t('false_positive_note')}**")
+            st.caption(f.get("false_positive_note", t("none_noted")))
         with col2:
-            st.markdown("**Business Impact**")
-            st.warning(f.get("business_impact", "Unknown"))
-            st.markdown("**Immediate Fix**")
-            st.success(f.get("immediate_fix") or f.get("recommended_fix", "No fix available."))
-            st.markdown("**Long-Term Fix**")
-            st.info(f.get("long_term_fix", "No long-term fix available."))
+            st.markdown(f"**{t('business_impact')}**")
+            st.warning(f.get("business_impact", t("unknown")))
+            st.markdown(f"**{t('immediate_fix')}**")
+            st.success(f.get("immediate_fix") or f.get("recommended_fix", t("no_fix")))
+            st.markdown(f"**{t('long_term_fix')}**")
+            st.info(f.get("long_term_fix", t("no_long_term_fix")))
 
 def render_score_gauge(score: int, severity: str):
     color = get_severity_color(severity)
@@ -339,7 +400,7 @@ def render_score_gauge(score: int, severity: str):
         mode="gauge+number",
         value=score,
         domain={"x": [0, 1], "y": [0, 1]},
-        title={"text": "Risk Score", "font": {"color": "#94A3B8", "family": "Space Mono", "size": 13}},
+        title={"text": t("score"), "font": {"color": "#94A3B8", "family": "Space Mono", "size": 13}},
         number={"font": {"color": color, "family": "Space Mono", "size": 42}},
         gauge={
             "axis": {"range": [0, 100], "tickcolor": "#64748B",
@@ -364,80 +425,141 @@ def render_score_gauge(score: int, severity: str):
     )
     return fig
 
+def build_json_export(
+    analysis_type: str,
+    input_name: str,
+    risk_score: int,
+    severity: str,
+    findings: list[dict],
+    exec_summary: dict,
+    rule_findings: list[dict] | None = None,
+    top_recommendations: list[str] | None = None,
+    attack_timeline: list[dict] | None = None,
+) -> str:
+    return json.dumps({
+        "app": APP_NAME,
+        "analysis_type": analysis_type,
+        "input_name": input_name,
+        "risk_score": risk_score,
+        "severity": severity,
+        "findings": findings,
+        "rule_findings": rule_findings or [],
+        "executive_summary": exec_summary,
+        "top_recommendations": top_recommendations or [],
+        "attack_timeline": attack_timeline or [],
+        "exported_at": datetime.now().isoformat()
+    }, indent=2, ensure_ascii=False)
+
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown('<div class="logo-title">🛡️ SentinelAI</div>', unsafe_allow_html=True)
-    st.markdown('<div class="logo-sub">Gemini Threat Analyzer</div>', unsafe_allow_html=True)
+    language_options = ["en", "tr"]
+    selected_language = st.radio(
+        "Language / Dil",
+        language_options,
+        index=language_options.index(st.session_state.language)
+        if st.session_state.language in language_options else 0,
+        format_func=lambda code: f"🇬🇧 English" if code == "en" else "🇹🇷 Türkçe",
+        horizontal=True,
+        label_visibility="collapsed",
+        key="language_selector",
+    )
+    st.session_state.language = selected_language
+
+    st.markdown(f'<div class="logo-title">🛡️ {APP_NAME}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="logo-sub">{t("sidebar_subtitle")}</div>', unsafe_allow_html=True)
     st.markdown("---")
 
     # API Key Input
-    st.markdown("### ⚙️ Configuration")
+    st.markdown(f"### ⚙️ {t('configuration')}")
     api_key_input = st.text_input(
-        "Gemini API Key",
+        t("gemini_api_key"),
         value=st.session_state.api_key,
         type="password",
         placeholder="AIza...",
-        help="Get your key at https://makersuite.google.com"
+        help=t("api_key_help")
     )
 
     if api_key_input != st.session_state.api_key:
         st.session_state.api_key = api_key_input
         st.session_state.api_key_valid = False
+        st.session_state.api_key_error = ""
 
-    if st.session_state.api_key and not st.session_state.api_key_valid:
-        if st.button("🔑 Validate Key"):
-            with st.spinner("Testing..."):
+    if not st.session_state.api_key:
+        st.info(f"⚪ {t('api_missing')}")
+    elif st.session_state.api_key_valid:
+        st.success(f"🟢 {t('api_valid')}")
+    else:
+        if st.session_state.api_key_error:
+            st.error(f"🔴 {t('api_failed')}: {st.session_state.api_key_error[:80]}")
+        else:
+            st.warning(f"🟡 {t('api_failed')}")
+
+        if st.button(f"🔑 {t('validate_key')}"):
+            with st.spinner(t("testing")):
                 ok, msg = test_api_key(st.session_state.api_key)
                 st.session_state.api_key_valid = ok
+                st.session_state.api_key_error = "" if ok else msg
                 if ok:
-                    st.success("API key valid ✓")
+                    st.success(f"{t('api_valid')} ✓")
                 else:
-                    st.error(f"Invalid: {msg[:80]}")
+                    st.error(f"{t('api_failed')}: {msg[:80]}")
 
-    if st.session_state.api_key_valid:
-        st.markdown('<div class="status-bar">● API CONNECTED</div>', unsafe_allow_html=True)
+    status_label = t("gemini_ready") if st.session_state.api_key_valid else t("local_ready")
+    st.markdown(f'<div class="status-bar">● {status_label.upper()}</div>', unsafe_allow_html=True)
 
     # Language Toggle
     st.markdown("---")
-    st.markdown("### 🌐 Language")
-    lang = st.radio("Explanation Language", ["🇬🇧 English", "🇹🇷 Türkçe"], horizontal=True,
-                    label_visibility="collapsed")
-    st.session_state.language = "tr" if "Türkçe" in lang else "en"
+    st.markdown(f"### 🌐 {t('language')}")
+    st.caption(t("explanation_language"))
 
     # Navigation
     st.markdown("---")
-    st.markdown("### 📂 Navigation")
+    st.markdown(f"### 📂 {t('navigation')}")
+    page_options = ["home", "logs", "code", "results", "history", "reports"]
+    page_icons = {
+        "home": "🏠",
+        "logs": "📋",
+        "code": "💻",
+        "results": "📊",
+        "history": "🕐",
+        "reports": "📄",
+    }
     page = st.radio(
-        "Go to",
-        ["🏠 Home", "📋 Analyze Logs", "💻 Analyze Code", "📊 Results", "🕐 History", "📄 Reports"],
-        label_visibility="collapsed"
+        t("go_to"),
+        page_options,
+        index=page_options.index(st.session_state.page)
+        if st.session_state.page in page_options else 0,
+        format_func=lambda key: f"{page_icons[key]} {t('page_' + key)}",
+        label_visibility="collapsed",
+        key="page_selector",
     )
+    st.session_state.page = page
 
     # Stats quick view
     st.markdown("---")
     stats = get_stats()
-    st.markdown("### 📈 Session Stats")
-    st.metric("Total Analyses", stats["total_analyses"])
-    st.metric("Avg Risk Score", f"{stats['avg_risk_score']}/100")
+    st.markdown(f"### 📈 {t('session_stats')}")
+    st.metric(t("total_analyses"), stats["total_analyses"])
+    st.metric(t("avg_risk_score"), f"{stats['avg_risk_score']}/100")
 
 # ─── Page: Home ───────────────────────────────────────────────────────────────
 
-if "Home" in page:
-    st.markdown("# 🛡️ SentinelAI")
-    st.markdown("**Gemini-Powered Cyber Threat & Vulnerability Analyzer**")
+if page == "home":
+    st.markdown(f"# 🛡️ {APP_NAME}")
+    st.markdown(f"**{t('app_subtitle')}**")
     st.markdown("---")
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("🔍 Analyses Run", stats["total_analyses"])
+        st.metric(f"🔍 {t('analyses_run')}", stats["total_analyses"])
     with col2:
-        st.metric("⚠️ Critical Found",
+        st.metric(f"⚠️ {t('critical_found')}",
                   stats["by_severity"].get("Critical", 0) + stats["by_severity"].get("High", 0))
     with col3:
-        st.metric("📊 Avg Risk Score", f"{stats['avg_risk_score']}/100")
+        st.metric(f"📊 {t('avg_risk_score')}", f"{stats['avg_risk_score']}/100")
     with col4:
-        st.metric("🎯 Threats Detected",
+        st.metric(f"🎯 {t('threats_detected')}",
                   sum(1 for t in stats["top_threats"] if t.get("cnt", 0) > 0))
 
     st.markdown("---")
@@ -445,25 +567,24 @@ if "Home" in page:
     col_l, col_r = st.columns([3, 2])
 
     with col_l:
-        st.markdown("### 🚀 What SentinelAI Does")
-        st.markdown("""
+        st.markdown(f"### 🚀 {t('what_app_does')}")
+        st.markdown(f"""
         <div class="sentinel-card">
-        <p>SentinelAI is an AI-powered security assistant that transforms raw log files and
-        vulnerable code into structured, actionable threat intelligence — in seconds.</p>
+        <p>{t('home_description')}</p>
         <br>
-        <b>How it works:</b><br>
+        <b>{t('how_it_works')}</b><br>
         <ol style="margin-left:16px; color:#94A3B8; line-height:2">
-          <li>📤 Upload a log file or paste a code snippet</li>
-          <li>🔍 Rule-based engine flags suspicious patterns</li>
-          <li>🤖 Gemini performs deep contextual analysis</li>
-          <li>📊 Risk score is computed (0–100 formula)</li>
-          <li>🗺️ Findings mapped to OWASP Top 10 and MITRE ATT&CK</li>
-          <li>📄 Download a full security report</li>
+          <li>📤 {t('home_step_upload')}</li>
+          <li>🔍 {t('home_step_rules')}</li>
+          <li>🤖 {t('home_step_gemini')}</li>
+          <li>📊 {t('home_step_risk')}</li>
+          <li>🗺️ {t('home_step_mapping')}</li>
+          <li>📄 {t('home_step_report')}</li>
         </ol>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("### 🎯 Threat Detection Coverage")
+        st.markdown(f"### 🎯 {t('threat_detection_coverage')}")
         coverage = {
             "SQL Injection": "A03:2021",
             "XSS (Cross-Site Scripting)": "A03:2021",
@@ -486,13 +607,13 @@ if "Home" in page:
             )
 
     with col_r:
-        st.markdown("### 📊 Threat Distribution")
+        st.markdown(f"### 📊 {t('threat_distribution')}")
         if stats["top_threats"]:
             threat_df = pd.DataFrame(stats["top_threats"])
             fig = px.bar(
                 threat_df, x="cnt", y="threat_type", orientation="h",
                 color_discrete_sequence=["#00E5FF"],
-                labels={"cnt": "Count", "threat_type": "Threat Type"}
+                labels={"cnt": t("count"), "threat_type": t("threat_type")}
             )
             fig.update_layout(
                 paper_bgcolor="#111827", plot_bgcolor="#111827",
@@ -504,9 +625,9 @@ if "Home" in page:
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Run your first analysis to see threat distribution.")
+            st.info(t("no_analyses_yet"))
 
-        st.markdown("### 🔴 Severity Breakdown")
+        st.markdown(f"### 🔴 {t('severity_breakdown')}")
         if stats["by_severity"]:
             sev_data = stats["by_severity"]
             colors = {"Critical": "#FF2D2D", "High": "#FF6B35",
@@ -528,13 +649,13 @@ if "Home" in page:
             )
             st.plotly_chart(fig2, use_container_width=True)
         else:
-            st.info("No analyses yet.")
+            st.info(t("no_analyses_yet"))
 
-        st.markdown("### 📁 Quick Start")
-        st.markdown("""
+        st.markdown(f"### 📁 {t('quick_start')}")
+        st.markdown(f"""
         <div class="sentinel-card">
         <p style="font-size:0.85rem; color:#94A3B8">
-          Try with built-in sample files:<br>
+          {t('quick_start_body')}<br>
           → <code>apache_access.log</code> — SQLi + Brute Force<br>
           → <code>vulnerable_login.php</code> — Auth + SQLi<br>
           → <code>vulnerable_flask.py</code> — Multi-vuln Flask
@@ -544,34 +665,42 @@ if "Home" in page:
 
 # ─── Page: Analyze Logs ───────────────────────────────────────────────────────
 
-elif "Analyze Logs" in page:
-    st.markdown("# 📋 Log Analysis")
-    st.markdown("Upload a security log file or use a sample to detect attack patterns.")
+elif page == "logs":
+    st.markdown(f"# 📋 {t('log_analysis')}")
+    st.markdown(t("log_intro"))
     st.markdown("---")
 
     if not st.session_state.api_key_valid:
-        st.warning("⚠️ Please enter and validate your Gemini API key in the sidebar first.")
+        st.warning(f"⚠️ {t('api_required_warning')}")
 
-    source = st.radio("Input Source", ["📤 Upload File", "📁 Use Sample Log"],
+    if st.button(f"▶ {t('demo_mode')}", help=t("demo_mode_help")):
+        st.session_state.demo_log_loaded = True
+
+    upload_source = f"📤 {t('upload_file')}"
+    sample_source = f"📁 {t('use_sample_log')}"
+    source = st.radio(t("input_source"), [upload_source, sample_source],
+                      index=1 if st.session_state.demo_log_loaded else 0,
                       horizontal=True, label_visibility="collapsed")
 
     log_content = ""
     log_filename = ""
 
-    if "Upload" in source:
-        uploaded = st.file_uploader("Upload Log File",
+    if source == upload_source:
+        st.session_state.demo_log_loaded = False
+        uploaded = st.file_uploader(t("upload_log_file"),
                                     type=["log", "txt", "csv"],
                                     label_visibility="collapsed")
         if uploaded:
             log_content = uploaded.read().decode("utf-8", errors="ignore")
             log_filename = uploaded.name
-            st.success(f"✓ Loaded: **{log_filename}** ({len(log_content):,} bytes)")
+            st.session_state.demo_log_loaded = False
+            st.success(f"✓ {t('loaded')}: **{log_filename}** ({len(log_content):,} bytes)")
     else:
         sample_path = SAMPLE_DATA_DIR / "apache_access.log"
         if sample_path.exists():
             log_content = sample_path.read_text()
             log_filename = "apache_access.log (sample)"
-            st.info("📁 Using built-in Apache access log sample with SQL injection, brute force, XSS, and path traversal examples.")
+            st.info(f"📁 {t('using_sample_log')}")
 
     if log_content:
         df, fmt = parse_log_file(log_content)
@@ -579,13 +708,13 @@ elif "Analyze Logs" in page:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("📄 Total Lines", log_stats.get("total_lines", 0))
+            st.metric(f"📄 {t('total_lines')}", log_stats.get("total_lines", 0))
         with col2:
-            st.metric("🖥️ Unique IPs", log_stats.get("unique_ips", "N/A"))
+            st.metric(f"🖥️ {t('unique_ips')}", log_stats.get("unique_ips", "N/A"))
         with col3:
-            st.metric("📂 Format Detected", fmt.upper())
+            st.metric(f"📂 {t('format_detected')}", fmt.upper())
 
-        with st.expander("🔍 Preview Log Data", expanded=False):
+        with st.expander(f"🔍 {t('preview_log_data')}", expanded=False):
             if not df.empty and "raw" in df.columns:
                 st.dataframe(
                     df[["ip", "method", "path", "status", "agent"]].head(20)
@@ -594,12 +723,12 @@ elif "Analyze Logs" in page:
                 )
 
         st.markdown("---")
-        st.markdown("### 🔎 Rule-Based Pre-Scan")
+        st.markdown(f"### 🔎 {t('rule_pre_scan')}")
 
         rule_findings = run_rule_detection(df, log_content)
 
         if rule_findings:
-            st.markdown(f'<div class="status-bar">⚠️ {len(rule_findings)} THREAT PATTERN(S) DETECTED BY RULE ENGINE</div>',
+            st.markdown(f'<div class="status-bar">⚠️ {t("threat_patterns_detected", count=len(rule_findings)).upper()}</div>',
                         unsafe_allow_html=True)
             for rf in rule_findings:
                 rule_conf_pct = int(float(rf.get("rule_confidence", rf.get("confidence", 0)) or 0) * 100)
@@ -610,7 +739,7 @@ elif "Analyze Logs" in page:
                         f'<div style="padding:8px 0; border-bottom:1px solid #1E2D40">'
                         f'<span style="color:#00E5FF;font-family:monospace">▶ {rf["threat_type"]}</span>'
                         f' &nbsp; <span style="color:#64748B;font-size:0.8rem">'
-                        f'{len(rf["matched_lines"])} line(s) flagged - {rule_conf_pct}% confidence</span>'
+                        f'{t("lines_flagged_confidence", lines=len(rf["matched_lines"]), confidence=rule_conf_pct)}</span>'
                         f'<br/><span style="color:#64748B;font-size:0.75rem">MITRE: {mitre}</span></div>',
                         unsafe_allow_html=True
                     )
@@ -620,11 +749,11 @@ elif "Analyze Logs" in page:
                         unsafe_allow_html=True
                     )
         else:
-            st.success("✅ No suspicious patterns detected by rule engine.")
+            st.success(f"✅ {t('no_rule_patterns')}")
 
         attack_timeline = build_attack_timeline(df, rule_findings)
         if attack_timeline:
-            with st.expander("Attack Timeline", expanded=False):
+            with st.expander(t("attack_timeline"), expanded=False):
                 timeline_df = pd.DataFrame(attack_timeline)
                 st.dataframe(
                     timeline_df[["timestamp", "source_ip", "threat_type", "method", "path", "status"]],
@@ -637,23 +766,23 @@ elif "Analyze Logs" in page:
         col_btn, col_info = st.columns([2, 3])
         with col_btn:
             analyze_btn = st.button(
-                "🤖 Analyze with Gemini AI",
+                f"🤖 {t('analyze_with_gemini')}",
                 disabled=not (st.session_state.api_key_valid and bool(rule_findings)),
                 use_container_width=True
             )
         with col_info:
             if not rule_findings:
-                st.info("No suspicious patterns to send to Gemini.")
+                st.info(t("no_patterns_to_send"))
             elif not st.session_state.api_key_valid:
-                st.warning("Validate API key first.")
+                st.warning(t("validate_api_first"))
             else:
                 st.markdown(
-                    f'<div class="status-bar">📡 {len(rule_findings)} threat pattern(s) ready for Gemini analysis</div>',
+                    f'<div class="status-bar">📡 {t("ready_for_gemini", count=len(rule_findings))}</div>',
                     unsafe_allow_html=True
                 )
 
         if analyze_btn and rule_findings and st.session_state.api_key_valid:
-            with st.spinner("🤖 Gemini is analyzing threat patterns..."):
+            with st.spinner(f"🤖 {t('gemini_logs_spinner')}"):
                 flagged_content = get_flagged_content_for_gemini(rule_findings)
                 pre_labels = summarize_rule_findings(rule_findings)
 
@@ -667,7 +796,7 @@ elif "Analyze Logs" in page:
 
                 exec_summary = {}
                 if findings:
-                    with st.spinner("📝 Generating executive summary..."):
+                    with st.spinner(f"📝 {t('summary_spinner')}"):
                         exec_summary = generate_executive_summary(
                             findings, risk_score, severity_label, st.session_state.api_key
                         )
@@ -705,33 +834,37 @@ elif "Analyze Logs" in page:
                 st.session_state.last_analysis_type = "log"
                 st.session_state.last_input_name = log_filename
 
-            st.success(f"✅ Analysis complete! Found {len(findings)} threats. View in Results page.")
+            st.success(f"✅ {t('analysis_complete_threats', count=len(findings))}")
             st.rerun()
+    else:
+        st.info(t("logs_empty_state"))
 
 # ─── Page: Analyze Code ───────────────────────────────────────────────────────
 
-elif "Analyze Code" in page:
-    st.markdown("# 💻 Code Vulnerability Analysis")
-    st.markdown("Paste code or load a sample to detect security vulnerabilities.")
+elif page == "code":
+    st.markdown(f"# 💻 {t('code_analysis')}")
+    st.markdown(t("code_intro"))
     st.markdown("---")
 
     if not st.session_state.api_key_valid:
-        st.warning("⚠️ Please enter and validate your Gemini API key in the sidebar first.")
+        st.warning(f"⚠️ {t('api_required_warning')}")
 
     col1, col2 = st.columns([3, 1])
     with col1:
-        source = st.radio("Source", ["✏️ Paste Code", "📁 Load Sample"],
+        paste_source = f"✏️ {t('paste_code')}"
+        sample_source = f"📁 {t('load_sample')}"
+        source = st.radio(t("source"), [paste_source, sample_source],
                           horizontal=True, label_visibility="collapsed")
     with col2:
-        language = st.selectbox("Language", ["PHP", "Python", "JavaScript", "Java", "Other"])
+        language = st.selectbox(t("code_language"), ["PHP", "Python", "JavaScript", "Java", "Other"])
 
     code_input = ""
     code_filename = f"snippet.{language.lower()}"
 
-    if "Paste" in source:
+    if source == paste_source:
         code_input = st.text_area(
-            "Code Snippet",
-            placeholder="Paste your code here...",
+            t("code_snippet"),
+            placeholder=t("code_placeholder"),
             height=300,
             label_visibility="collapsed"
         )
@@ -744,21 +877,21 @@ elif "Analyze Code" in page:
         if sample_path and sample_path.exists():
             code_input = sample_path.read_text()
             code_filename = sample_path.name
-            st.info(f"📁 Loaded: **{code_filename}**")
+            st.info(f"📁 {t('sample_loaded')}: **{code_filename}**")
             st.code(code_input, language=language.lower())
         else:
-            st.warning(f"No sample available for {language}. Try PHP or Python.")
+            st.warning(t("no_sample_available", language=language))
 
     if code_input:
         # Rule-based pre-scan on raw text
         st.markdown("---")
-        st.markdown("### 🔎 Static Analysis Pre-Scan")
+        st.markdown(f"### 🔎 {t('static_pre_scan')}")
         empty_df = pd.DataFrame()
         rule_findings = run_rule_detection(empty_df, code_input)
 
         if rule_findings:
             st.markdown(
-                f'<div class="status-bar">⚠️ {len(rule_findings)} VULNERABILITY PATTERN(S) DETECTED</div>',
+                f'<div class="status-bar">⚠️ {t("vulnerability_patterns_detected", count=len(rule_findings)).upper()}</div>',
                 unsafe_allow_html=True
             )
             for rf in rule_findings:
@@ -768,23 +901,23 @@ elif "Analyze Code" in page:
                     f'<div style="padding:8px 0; border-bottom:1px solid #1E2D40">'
                     f'<span style="color:#FF6B35;font-family:monospace">▶ {rf["threat_type"]}</span>'
                     f' — <span style="color:#64748B;font-size:0.8rem">'
-                    f'{rf["owasp_category"]} - {rule_conf_pct}% confidence</span>'
+                    f'{rf["owasp_category"]} - {t("rule_confidence_short")} {rule_conf_pct}%</span>'
                     f'<br/><span style="color:#64748B;font-size:0.75rem">MITRE: {mitre}</span></div>',
                     unsafe_allow_html=True
                 )
         else:
-            st.info("No obvious patterns detected. Gemini may still find subtle issues.")
+            st.info(t("no_obvious_patterns"))
 
         col_btn, _ = st.columns([2, 3])
         with col_btn:
             analyze_btn = st.button(
-                "🤖 Analyze with Gemini AI",
+                f"🤖 {t('analyze_with_gemini')}",
                 disabled=not st.session_state.api_key_valid,
                 use_container_width=True
             )
 
         if analyze_btn and st.session_state.api_key_valid:
-            with st.spinner("🤖 Gemini is reviewing your code for vulnerabilities..."):
+            with st.spinner(f"🤖 {t('gemini_code_spinner')}"):
                 pre_labels = summarize_rule_findings(rule_findings)
                 gemini_findings = analyze_code(
                     code_input, language, pre_labels, st.session_state.api_key
@@ -823,16 +956,18 @@ elif "Analyze Code" in page:
                 st.session_state.last_analysis_type = "code"
                 st.session_state.last_input_name = code_filename
 
-            st.success(f"✅ Analysis complete! Found {len(findings)} vulnerabilities.")
+            st.success(f"✅ {t('analysis_complete_vulns', count=len(findings))}")
             st.rerun()
+    else:
+        st.info(t("code_empty_state"))
 
 # ─── Page: Results ────────────────────────────────────────────────────────────
 
-elif "Results" in page:
-    st.markdown("# 📊 Analysis Results")
+elif page == "results":
+    st.markdown(f"# 📊 {t('analysis_results')}")
 
     if not st.session_state.last_findings and st.session_state.last_risk_score == 0:
-        st.info("No results yet. Run an analysis from 'Analyze Logs' or 'Analyze Code'.")
+        st.info(t("no_results"))
     else:
         findings = st.session_state.last_findings
         risk_score = st.session_state.last_risk_score
@@ -853,24 +988,24 @@ elif "Results" in page:
             )
 
         with col_info:
-            st.markdown(f"### Analysis: `{st.session_state.last_input_name}`")
+            st.markdown(f"### {t('analysis')}: `{st.session_state.last_input_name}`")
 
             breakdown = get_score_breakdown(findings, rule_findings)
             col_a, col_b, col_c, col_d = st.columns(4)
-            col_a.metric("Findings", breakdown.get("finding_count", 0))
-            col_b.metric("Avg Confidence",
+            col_a.metric(t("findings"), breakdown.get("finding_count", 0))
+            col_b.metric(t("avg_confidence"),
                          f"{int(breakdown.get('avg_gemini_confidence', 0)*100)}%")
-            col_c.metric("Flagged Lines", breakdown.get("flagged_lines_count", 0))
-            col_d.metric("Rule Confidence", f"{int(breakdown.get('avg_rule_confidence', 0)*100)}%")
+            col_c.metric(t("flagged_lines"), breakdown.get("flagged_lines_count", 0))
+            col_d.metric(t("rule_confidence"), f"{int(breakdown.get('avg_rule_confidence', 0)*100)}%")
 
             # Severity distribution bar
             sev_dist = breakdown.get("severity_distribution", {})
             if sev_dist:
-                sev_df = pd.DataFrame(list(sev_dist.items()), columns=["Severity", "Count"])
+                sev_df = pd.DataFrame(list(sev_dist.items()), columns=[t("severity"), t("count")])
                 colors = {"Critical":"#FF2D2D","High":"#FF6B35","Medium":"#FFB700",
                           "Low":"#22C55E","Informational":"#3B82F6"}
-                fig = px.bar(sev_df, x="Count", y="Severity", orientation="h",
-                             color="Severity",
+                fig = px.bar(sev_df, x=t("count"), y=t("severity"), orientation="h",
+                             color=t("severity"),
                              color_discrete_map=colors)
                 fig.update_layout(
                     paper_bgcolor="#111827", plot_bgcolor="#111827",
@@ -882,25 +1017,45 @@ elif "Results" in page:
                 st.plotly_chart(fig, use_container_width=True)
 
         with col_actions:
-            st.markdown("### Quick Actions")
-            if st.button("📄 Generate Report", use_container_width=True):
+            st.markdown(f"### {t('quick_actions')}")
+            if st.button(f"📄 {t('generate_report')}", use_container_width=True):
                 report_text = build_text_report(
                     st.session_state.last_analysis_type,
                     st.session_state.last_input_name,
                     risk_score, severity, findings, exec_summary,
                     rule_findings=rule_findings,
                     attack_timeline=attack_timeline,
+                    language=st.session_state.language,
                     top_recommendations=top_recommendations
                 )
                 st.download_button(
-                    "⬇️ Download .txt",
+                    f"⬇️ {t('download_txt')}",
                     data=report_text,
-                    file_name=f"sentinelai_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    file_name=f"threatlens_ai_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                     mime="text/plain",
                     use_container_width=True
                 )
 
-            if st.button("🗑️ Clear Results", use_container_width=True):
+            json_export = build_json_export(
+                st.session_state.last_analysis_type,
+                st.session_state.last_input_name,
+                risk_score,
+                severity,
+                findings,
+                exec_summary,
+                rule_findings=rule_findings,
+                top_recommendations=top_recommendations,
+                attack_timeline=attack_timeline,
+            )
+            st.download_button(
+                f"⬇️ {t('download_json')}",
+                data=json_export,
+                file_name=f"threatlens_ai_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+
+            if st.button(f"🗑️ {t('clear_results')}", use_container_width=True):
                 for k in [
                     "last_findings", "last_rule_findings", "last_top_recommendations",
                     "last_attack_timeline"
@@ -913,36 +1068,44 @@ elif "Results" in page:
                 st.rerun()
 
         st.markdown("---")
+        st.markdown(f"### ✅ {t('top_3_recommendations')}")
+        if top_recommendations:
+            for i, recommendation in enumerate(top_recommendations[:3], 1):
+                st.markdown(f"**{i}.** {recommendation}")
+        else:
+            st.info(t("no_recommendations"))
+
+        st.markdown("---")
 
         # Tabs
         tab1, tab_rec, tab2, tab_mitre, tab3, tab_timeline = st.tabs([
-            "🎯 Threat Findings",
-            "✅ Top Recommendations",
-            "📋 Executive Summary",
-            "🧭 MITRE ATT&CK",
-            "🗺️ OWASP Map",
-            "⏱️ Attack Timeline"
+            f"🎯 {t('tab_findings')}",
+            f"✅ {t('tab_recommendations')}",
+            f"📋 {t('tab_summary')}",
+            f"🧭 {t('tab_mitre')}",
+            f"🗺️ {t('tab_owasp')}",
+            f"⏱️ {t('tab_timeline')}"
         ])
 
         with tab1:
             if not findings:
-                st.success("✅ No threats detected in this analysis.")
+                st.success(f"✅ {t('no_threats_detected')}")
             else:
                 for i, f in enumerate(findings, 1):
                     finding_card(f, i)
 
                     # Turkish translation
                     if st.session_state.language == "tr" and st.session_state.api_key_valid:
-                        with st.expander(f"🇹🇷 Türkçe Açıklama — Bulgu #{i}"):
-                            with st.spinner("Türkçeye çevriliyor..."):
+                        with st.expander(f"🇹🇷 {t('turkish_explanation')} — #{i}"):
+                            with st.spinner(t("translating")):
                                 tr = translate_to_turkish(f, st.session_state.api_key)
                             if tr:
-                                st.markdown(f"**Basit Açıklama:** {tr.get('basit_aciklama','')}")
-                                st.markdown(f"**Ne Olabilir:** {tr.get('ne_olabilir','')}")
-                                st.markdown(f"**İş Etkisi:** {tr.get('is_etkisi','')}")
+                                st.markdown(f"**{t('simple_explanation')}:** {tr.get('basit_aciklama','')}")
+                                st.markdown(f"**{t('what_could_happen')}:** {tr.get('ne_olabilir','')}")
+                                st.markdown(f"**{t('business_impact')}:** {tr.get('is_etkisi','')}")
                                 steps = tr.get("hemen_yapilacaklar", [])
                                 if steps:
-                                    st.markdown("**Hemen Yapılacaklar:**")
+                                    st.markdown(f"**{t('what_to_do_now')}:**")
                                     for s in steps:
                                         st.markdown(f"  • {s}")
 
@@ -951,31 +1114,31 @@ elif "Results" in page:
                 for i, recommendation in enumerate(top_recommendations, 1):
                     st.markdown(f"**{i}.** {recommendation}")
             else:
-                st.info("No prioritized recommendations available.")
+                st.info(t("no_recommendations"))
 
         with tab2:
             if exec_summary:
                 st.markdown(
                     f'<div class="sentinel-card">'
-                    f'<h3 style="font-family:Space Mono;color:#00E5FF;margin-top:0">Executive Summary</h3>'
+                    f'<h3 style="font-family:Space Mono;color:#00E5FF;margin-top:0">{t("tab_summary")}</h3>'
                     f'<p style="font-size:1rem;line-height:1.7">{exec_summary.get("summary_paragraph","")}</p>'
                     f'</div>',
                     unsafe_allow_html=True
                 )
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.markdown("**🚨 Top Priority Action**")
+                    st.markdown(f"**🚨 {t('top_priority_action')}**")
                     st.error(exec_summary.get("top_priority_action", "N/A"))
-                    st.markdown("**💼 Business Risk**")
+                    st.markdown(f"**💼 {t('business_risk')}**")
                     st.warning(exec_summary.get("estimated_business_risk", "N/A"))
                 with col2:
-                    st.markdown("**✅ Positive Notes**")
+                    st.markdown(f"**✅ {t('positive_notes')}**")
                     st.success(exec_summary.get("positive_notes", "N/A"))
-                    st.markdown("**📋 Recommended Next Steps**")
+                    st.markdown(f"**📋 {t('recommended_next_steps')}**")
                     for i, step in enumerate(exec_summary.get("recommended_next_steps", []), 1):
                         st.markdown(f"{i}. {step}")
             else:
-                st.info("Executive summary not available.")
+                st.info(t("summary_not_available"))
 
         with tab_mitre:
             mitre_map = {}
@@ -993,24 +1156,28 @@ elif "Results" in page:
                     with st.expander(f"{label} ({data['tactic']})", expanded=True):
                         for threat in sorted(set(data["threats"])):
                             st.markdown(f"- {threat}")
-                        st.caption("Reference: https://attack.mitre.org/")
+                        st.caption(f"{t('reference')}: https://attack.mitre.org/")
             else:
-                st.info("No MITRE ATT&CK mappings available.")
+                st.info(t("mitre_unavailable"))
 
         with tab3:
             owasp_map = {}
             for f in findings:
-                cat = f.get("owasp_category", "Unknown")
-                owasp_map.setdefault(cat, []).append(f.get("threat_type", "Unknown"))
+                cat = f.get("owasp_category", t("unknown"))
+                mitre = f.get("mitre_attack_summary") or format_mitre_attack(f.get("mitre_attack"))
+                owasp_map.setdefault(cat, []).append({
+                    "threat": f.get("threat_type", t("unknown")),
+                    "mitre": mitre,
+                })
 
             if owasp_map:
-                for cat, threats in owasp_map.items():
+                for cat, entries in owasp_map.items():
                     with st.expander(f"📌 {cat}", expanded=True):
-                        for t in threats:
-                            st.markdown(f"  ⚔️ {t}")
-                        st.caption(f"Reference: https://owasp.org/Top10/")
+                        for entry in entries:
+                            st.markdown(f"  ⚔️ {entry['threat']} — MITRE: {entry['mitre']}")
+                        st.caption(f"{t('reference')}: https://owasp.org/Top10/")
             else:
-                st.info("No OWASP mappings available.")
+                st.info(t("owasp_unavailable"))
 
         with tab_timeline:
             if attack_timeline:
@@ -1020,38 +1187,38 @@ elif "Results" in page:
                     use_container_width=True,
                     height=320
                 )
-                with st.expander("Timeline Evidence", expanded=False):
+                with st.expander(t("timeline_evidence"), expanded=False):
                     for item in attack_timeline[:10]:
-                        st.markdown(f'**{item.get("timestamp", "unknown")} - {item.get("threat_type", "Unknown")}**')
+                        st.markdown(f'**{item.get("timestamp", "unknown")} - {item.get("threat_type", t("unknown"))}**')
                         st.code(item.get("evidence", ""), language="text")
             else:
-                st.info("No timestamped attack timeline available for this analysis.")
+                st.info(t("timeline_unavailable"))
 
 # ─── Page: History ────────────────────────────────────────────────────────────
 
-elif "History" in page:
-    st.markdown("# 🕐 Analysis History")
+elif page == "history":
+    st.markdown(f"# 🕐 {t('analysis_history')}")
     st.markdown("---")
 
     analyses = get_all_analyses(50)
 
     if not analyses:
-        st.info("No analyses yet. Start by analyzing a log or code file.")
+        st.info(t("history_empty"))
     else:
         # Filter controls
         col1, col2 = st.columns([2, 1])
         with col1:
-            search = st.text_input("🔍 Search by filename", placeholder="e.g. apache, flask...")
+            search = st.text_input(f"🔍 {t('search_by_filename')}", placeholder="e.g. apache, flask...")
         with col2:
-            filter_type = st.selectbox("Filter by type", ["All", "log", "code"])
+            filter_type = st.selectbox(t("filter_by_type"), [t("all"), "log", "code"])
 
         filtered = [
             a for a in analyses
             if (not search or search.lower() in (a.get("input_filename") or "").lower())
-            and (filter_type == "All" or a.get("analysis_type") == filter_type)
+            and (filter_type == t("all") or a.get("analysis_type") == filter_type)
         ]
 
-        st.markdown(f"**{len(filtered)} record(s)**")
+        st.markdown(f"**{t('records', count=len(filtered))}**")
 
         for a in filtered:
             sev = a.get("severity_label", "Unknown")
@@ -1063,12 +1230,12 @@ elif "History" in page:
             n_findings = a.get("total_findings", 0)
 
             with st.expander(
-                f"{sev_badge} {fname} — Score: {score}/100 — {created}",
+                f"{sev_badge} {fname} — {t('score')}: {score}/100 — {created}",
                 expanded=False
             ):
                 col_d, col_act = st.columns([4, 1])
                 with col_d:
-                    st.markdown(f"**Type:** {a_type} &nbsp;|&nbsp; **Findings:** {n_findings} &nbsp;|&nbsp; **Language:** {a.get('language','en').upper()}")
+                    st.markdown(f"**{t('type')}:** {a_type} &nbsp;|&nbsp; **{t('findings')}:** {n_findings} &nbsp;|&nbsp; **{t('language_label')}:** {a.get('language','en').upper()}")
                     detail = get_analysis_detail(a["id"])
                     for finding in detail.get("findings", []):
                         st.markdown(
@@ -1078,7 +1245,7 @@ elif "History" in page:
                             unsafe_allow_html=True
                         )
                 with col_act:
-                    if st.button(f"🗑️ Delete", key=f"del_{a['id']}"):
+                    if st.button(f"🗑️ {t('delete')}", key=f"del_{a['id']}"):
                         delete_analysis(a["id"])
                         st.rerun()
 
@@ -1094,25 +1261,26 @@ elif "History" in page:
                         fname, score, sev,
                         detail2.get("findings", []),
                         stored_summary,
+                        language=st.session_state.language,
                         rule_findings=[],
                         attack_timeline=analysis_meta.get("attack_timeline", []),
                         top_recommendations=analysis_meta.get("top_recommendations", [])
                     )
                     st.download_button(
-                        "📄 Export",
+                        f"📄 {t('export')}",
                         data=report_text,
-                        file_name=f"sentinel_{a['id']}.txt",
+                        file_name=f"threatlens_{a['id']}.txt",
                         key=f"exp_{a['id']}"
                     )
 
 # ─── Page: Reports ────────────────────────────────────────────────────────────
 
-elif "Reports" in page:
-    st.markdown("# 📄 Report Export")
+elif page == "reports":
+    st.markdown(f"# 📄 {t('report_export')}")
     st.markdown("---")
 
     if not st.session_state.last_findings and st.session_state.last_risk_score == 0:
-        st.info("No active analysis. Run an analysis first, then export here.")
+        st.info(t("no_active_analysis"))
     else:
         findings = st.session_state.last_findings
         risk_score = st.session_state.last_risk_score
@@ -1122,14 +1290,14 @@ elif "Reports" in page:
         top_recommendations = st.session_state.last_top_recommendations
         attack_timeline = st.session_state.last_attack_timeline
 
-        st.markdown("### 📊 Current Analysis Summary")
+        st.markdown(f"### 📊 {t('current_analysis_summary')}")
         col1, col2, col3 = st.columns(3)
-        col1.metric("Risk Score", f"{risk_score}/100")
-        col2.metric("Severity", severity)
-        col3.metric("Findings", len(findings))
+        col1.metric(t("score"), f"{risk_score}/100")
+        col2.metric(t("severity"), severity)
+        col3.metric(t("findings"), len(findings))
 
         st.markdown("---")
-        st.markdown("### ⬇️ Download Report")
+        st.markdown(f"### ⬇️ {t('download_report')}")
 
         report_text = build_text_report(
             st.session_state.last_analysis_type,
@@ -1141,35 +1309,35 @@ elif "Reports" in page:
             top_recommendations=top_recommendations
         )
 
-        st.text_area("Report Preview", value=report_text[:3000] + "\n...", height=400,
+        st.text_area(t("report_preview"), value=report_text[:3000] + "\n...", height=400,
                      label_visibility="collapsed")
 
         st.download_button(
-            label="📥 Download Full Report (.txt)",
+            label=f"📥 {t('download_full_report')}",
             data=report_text,
-            file_name=f"sentinelai_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            file_name=f"threatlens_ai_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
             mime="text/plain",
             use_container_width=True
         )
 
         st.markdown("---")
-        st.markdown("### 📋 Raw JSON Export")
-        json_export = json.dumps({
-            "analysis_type": st.session_state.last_analysis_type,
-            "input_name": st.session_state.last_input_name,
-            "risk_score": risk_score,
-            "severity": severity,
-            "findings": findings,
-            "executive_summary": exec_summary,
-            "top_recommendations": top_recommendations,
-            "attack_timeline": attack_timeline,
-            "exported_at": datetime.now().isoformat()
-        }, indent=2, ensure_ascii=False)
+        st.markdown(f"### 📋 {t('raw_json_export')}")
+        json_export = build_json_export(
+            st.session_state.last_analysis_type,
+            st.session_state.last_input_name,
+            risk_score,
+            severity,
+            findings,
+            exec_summary,
+            rule_findings=rule_findings,
+            top_recommendations=top_recommendations,
+            attack_timeline=attack_timeline,
+        )
 
         st.download_button(
-            label="📥 Download JSON",
+            label=f"📥 {t('download_json')}",
             data=json_export,
-            file_name=f"sentinelai_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            file_name=f"threatlens_ai_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             mime="application/json",
             use_container_width=True
         )

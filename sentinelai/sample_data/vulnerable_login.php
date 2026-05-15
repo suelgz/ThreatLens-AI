@@ -1,6 +1,6 @@
 <?php
 // VULNERABLE PHP LOGIN - For educational/demo purposes only
-// This code contains intentional security flaws for SentinelAI demonstration
+// This code contains intentional security flaws for ThreatLens AI demonstration
 
 $host = "localhost";
 $username = "root";
