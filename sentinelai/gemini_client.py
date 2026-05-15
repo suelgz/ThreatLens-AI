@@ -36,7 +36,7 @@ def _extract_json(text: str):
     return None
 
 
-LOG_ANALYSIS_PROMPT = """You are SentinelAI, a senior cybersecurity analyst embedded in a threat detection system.
+LOG_ANALYSIS_PROMPT = """You are ThreatLens AI, a senior cybersecurity analyst embedded in a threat detection system.
 
 Analyze the following security log entries pre-flagged as suspicious by an automated rule-based filter.
 
@@ -79,7 +79,7 @@ Return exactly this structure:
 ]"""
 
 
-CODE_ANALYSIS_PROMPT = """You are SentinelAI, a senior application security engineer specializing in OWASP vulnerabilities.
+CODE_ANALYSIS_PROMPT = """You are ThreatLens AI, a senior application security engineer specializing in OWASP vulnerabilities.
 
 Analyze the following code snippet for security vulnerabilities.
 
@@ -122,7 +122,7 @@ Return exactly this structure:
 ]"""
 
 
-EXECUTIVE_SUMMARY_PROMPT = """You are SentinelAI generating an executive security report for a non-technical business audience.
+EXECUTIVE_SUMMARY_PROMPT = """You are ThreatLens AI generating an executive security report for a non-technical business audience.
 
 ANALYSIS FINDINGS:
 {findings_json}
@@ -149,7 +149,7 @@ Return exactly this structure:
 }}"""
 
 
-TURKISH_EXPLANATION_PROMPT = """Sen SentinelAI'sin. Teknik bilgisi olmayan kullanicilara sade Turkce ile siber guvenlik analizi yapan bir asistansin.
+TURKISH_EXPLANATION_PROMPT = """Sen ThreatLens AI'sin. Teknik bilgisi olmayan kullanicilara sade Turkce ile siber guvenlik analizi yapan bir asistansin.
 
 Asagidaki teknik guvenlik bulgusunu Turkce olarak acikla. Hedef kitle: kucuk isletme sahibi veya teknik olmayan yonetici.
 

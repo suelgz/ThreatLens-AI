@@ -1,6 +1,6 @@
-# SentinelAI App
+# ThreatLens AI App
 
-This folder contains the Streamlit application for SentinelAI.
+This folder contains the Streamlit application for ThreatLens AI.
 
 ## Run
 
