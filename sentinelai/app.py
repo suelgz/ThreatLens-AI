@@ -454,17 +454,16 @@ def build_json_export(
 
 with st.sidebar:
     language_options = ["en", "tr"]
-    selected_language = st.radio(
+    st.radio(
         "Language / Dil",
         language_options,
-        index=language_options.index(st.session_state.language)
-        if st.session_state.language in language_options else 0,
+        index=language_options.index(st.session_state["language"])
+        if st.session_state["language"] in language_options else 0,
         format_func=lambda code: f"🇬🇧 English" if code == "en" else "🇹🇷 Türkçe",
         horizontal=True,
         label_visibility="collapsed",
-        key="language_selector",
+        key="language",
     )
-    st.session_state.language = selected_language
 
     st.markdown(f'<div class="logo-title">🛡️ {APP_NAME}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="logo-sub">{t("sidebar_subtitle")}</div>', unsafe_allow_html=True)
@@ -507,11 +506,6 @@ with st.sidebar:
 
     status_label = t("gemini_ready") if st.session_state.api_key_valid else t("local_ready")
     st.markdown(f'<div class="status-bar">● {status_label.upper()}</div>', unsafe_allow_html=True)
-
-    # Language Toggle
-    st.markdown("---")
-    st.markdown(f"### 🌐 {t('language')}")
-    st.caption(t("explanation_language"))
 
     # Navigation
     st.markdown("---")
@@ -810,7 +804,7 @@ elif page == "logs":
                     severity_label=severity_label,
                     findings=findings,
                     executive_summary=json.dumps(exec_summary),
-                    language=st.session_state.language,
+                    language=st.session_state["language"],
                     top_recommendations=top_recommendations,
                     attack_timeline=attack_timeline
                 )
@@ -940,7 +934,7 @@ elif page == "code":
                     severity_label=severity_label,
                     findings=findings,
                     executive_summary=json.dumps(exec_summary),
-                    language=st.session_state.language,
+                    language=st.session_state["language"],
                     top_recommendations=top_recommendations,
                     attack_timeline=[]
                 )
@@ -1025,7 +1019,7 @@ elif page == "results":
                     risk_score, severity, findings, exec_summary,
                     rule_findings=rule_findings,
                     attack_timeline=attack_timeline,
-                    language=st.session_state.language,
+                    language=st.session_state["language"],
                     top_recommendations=top_recommendations
                 )
                 st.download_button(
@@ -1095,7 +1089,7 @@ elif page == "results":
                     finding_card(f, i)
 
                     # Turkish translation
-                    if st.session_state.language == "tr" and st.session_state.api_key_valid:
+                    if st.session_state["language"] == "tr" and st.session_state.api_key_valid:
                         with st.expander(f"🇹🇷 {t('turkish_explanation')} — #{i}"):
                             with st.spinner(t("translating")):
                                 tr = translate_to_turkish(f, st.session_state.api_key)
@@ -1261,7 +1255,7 @@ elif page == "history":
                         fname, score, sev,
                         detail2.get("findings", []),
                         stored_summary,
-                        language=st.session_state.language,
+                        language=st.session_state["language"],
                         rule_findings=[],
                         attack_timeline=analysis_meta.get("attack_timeline", []),
                         top_recommendations=analysis_meta.get("top_recommendations", [])
@@ -1303,7 +1297,7 @@ elif page == "reports":
             st.session_state.last_analysis_type,
             st.session_state.last_input_name,
             risk_score, severity, findings, exec_summary,
-            language=st.session_state.language,
+            language=st.session_state["language"],
             rule_findings=rule_findings,
             attack_timeline=attack_timeline,
             top_recommendations=top_recommendations
