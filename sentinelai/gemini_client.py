@@ -12,6 +12,10 @@ from threat_knowledge import enrich_finding
 MODEL_NAME = "gemini-2.0-flash"
 
 
+class GeminiAPIError(RuntimeError):
+    """Raised when Gemini enrichment fails before producing findings."""
+
+
 def _get_client(api_key: str):
     return genai.Client(api_key=api_key)
 
@@ -193,7 +197,7 @@ def analyze_logs(log_content: str, pre_labels: str, api_key: str) -> list:
         result = _extract_json(text)
         return _enrich_result(result) if isinstance(result, list) else []
     except Exception as exc:
-        return [_error_finding(str(exc))]
+        raise GeminiAPIError(str(exc)) from exc
 
 
 def analyze_code(code_snippet: str, language: str, pre_labels: str, api_key: str) -> list:
@@ -207,7 +211,7 @@ def analyze_code(code_snippet: str, language: str, pre_labels: str, api_key: str
         result = _extract_json(text)
         return _enrich_result(result) if isinstance(result, list) else []
     except Exception as exc:
-        return [_error_finding(str(exc))]
+        raise GeminiAPIError(str(exc)) from exc
 
 
 def generate_executive_summary(findings: list, risk_score: int, severity_label: str, api_key: str) -> dict:
@@ -254,20 +258,6 @@ def _enrich_result(result: list) -> list:
         for item in result
         if isinstance(item, dict)
     ]
-
-
-def _error_finding(error_msg: str) -> dict:
-    return enrich_finding({
-        "threat_detected": False,
-        "threat_type": "Other",
-        "severity": "Unknown",
-        "confidence": 0,
-        "evidence": "",
-        "explanation": f"Gemini API error: {error_msg}",
-        "recommended_fix": "Check your API key, network access, and Gemini quota, then try again.",
-        "business_impact": "AI enrichment was unavailable, so rule-based findings should be reviewed manually.",
-        "false_positive_note": "This is an API error marker, not a security finding.",
-    })
 
 
 def _default_summary(severity_label: str, error: str = "") -> dict:
