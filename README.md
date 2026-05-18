@@ -4,6 +4,16 @@ ThreatLens AI is a Streamlit-based cybersecurity analysis assistant that helps r
 
 The project is designed for defensive security review, education, demos, and early triage. It does not perform live network scanning or exploitation.
 
+## Live Demo
+
+ThreatLens AI is ready to run on Streamlit Community Cloud. The Streamlit main file path is:
+
+```text
+sentinelai/app.py
+```
+
+For public demos, users can click Demo Mode to load sample Apache logs and run the local rule-based pre-scan without entering an API key. Gemini enrichment, executive summaries, and Turkish AI explanations require a Gemini API key.
+
 ## What ThreatLens AI Does
 
 ThreatLens AI accepts a log file or code snippet and runs a two-stage analysis pipeline:
@@ -78,6 +88,17 @@ source .venv/bin/activate
 ```
 
 Then open the Streamlit URL shown in the terminal and paste your Gemini API key in the sidebar.
+
+## Streamlit Community Cloud Deployment
+
+1. Push the repository to GitHub.
+2. In Streamlit Community Cloud, create a new app from the repository.
+3. Set the main file path to `sentinelai/app.py`.
+4. Keep the Python dependencies in `sentinelai/requirements.txt`; the root `requirements.txt` points Streamlit Cloud to that file.
+5. Optional: add `GEMINI_API_KEY` in Streamlit app secrets for a prefilled private default key.
+6. Deploy the app.
+
+Do not commit API keys to GitHub. If no Streamlit secret is configured, users can paste their Gemini API key into the sidebar at runtime. The key is used only for the current Streamlit session and is not stored in the repository.
 
 ## Gemini API Key
 

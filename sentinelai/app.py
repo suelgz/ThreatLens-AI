@@ -17,7 +17,7 @@ from rule_detector import run_rule_detection, get_flagged_content_for_gemini, su
 from risk_scoring import compute_risk_score, get_severity_color, get_score_breakdown
 from gemini_client import (
     analyze_logs, analyze_code, generate_executive_summary,
-    translate_to_turkish, test_api_key
+    GeminiAPIError, translate_to_turkish, test_api_key
 )
 from i18n import APP_NAME, translate_text
 from report_generator import build_text_report
@@ -312,9 +312,17 @@ st.markdown("""
 
 # ─── Session State Defaults ───────────────────────────────────────────────────
 
+def get_secret_api_key() -> str:
+    try:
+        return st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        return ""
+
+
 def init_state():
+    default_api_key = get_secret_api_key()
     defaults = {
-        "api_key": "",
+        "api_key": default_api_key,
         "api_key_valid": False,
         "last_findings": [],
         "last_rule_findings": [],
@@ -492,17 +500,14 @@ with st.sidebar:
         if st.session_state.api_key_error:
             st.error(f"🔴 {t('api_failed')}: {st.session_state.api_key_error[:80]}")
         else:
-            st.warning(f"🟡 {t('api_failed')}")
+            st.warning(f"🟡 {t('api_not_validated')}")
 
         if st.button(f"🔑 {t('validate_key')}"):
             with st.spinner(t("testing")):
                 ok, msg = test_api_key(st.session_state.api_key)
                 st.session_state.api_key_valid = ok
                 st.session_state.api_key_error = "" if ok else msg
-                if ok:
-                    st.success(f"{t('api_valid')} ✓")
-                else:
-                    st.error(f"{t('api_failed')}: {msg[:80]}")
+            st.rerun()
 
     status_label = t("gemini_ready") if st.session_state.api_key_valid else t("local_ready")
     st.markdown(f'<div class="status-bar">● {status_label.upper()}</div>', unsafe_allow_html=True)
@@ -665,9 +670,10 @@ elif page == "logs":
     st.markdown("---")
 
     if not st.session_state.api_key_valid:
-        st.warning(f"⚠️ {t('api_required_warning')}")
+        st.info(f"ℹ️ {t('local_scan_available')}")
 
-    if st.button(f"▶ {t('demo_mode')}", help=t("demo_mode_help")):
+    st.markdown(f'<div class="status-bar">▶ {t("demo_mode_cta")} — {t("demo_mode_help")}</div>', unsafe_allow_html=True)
+    if st.button(f"▶ {t('demo_mode')}", help=t("demo_mode_help"), use_container_width=True):
         st.session_state.demo_log_loaded = True
 
     upload_source = f"📤 {t('upload_file')}"
@@ -760,15 +766,15 @@ elif page == "logs":
         col_btn, col_info = st.columns([2, 3])
         with col_btn:
             analyze_btn = st.button(
-                f"🤖 {t('analyze_with_gemini')}",
-                disabled=not (st.session_state.api_key_valid and bool(rule_findings)),
+                f"⏳ {t('analyzing')}" if st.session_state.analyzing else f"🤖 {t('analyze_with_gemini')}",
+                disabled=st.session_state.analyzing or not (st.session_state.api_key_valid and bool(rule_findings)),
                 use_container_width=True
             )
         with col_info:
             if not rule_findings:
                 st.info(t("no_patterns_to_send"))
             elif not st.session_state.api_key_valid:
-                st.warning(t("validate_api_first"))
+                st.info(t("local_scan_available"))
             else:
                 st.markdown(
                     f'<div class="status-bar">📡 {t("ready_for_gemini", count=len(rule_findings))}</div>',
@@ -776,60 +782,68 @@ elif page == "logs":
                 )
 
         if analyze_btn and rule_findings and st.session_state.api_key_valid:
-            with st.spinner(f"🤖 {t('gemini_logs_spinner')}"):
-                flagged_content = get_flagged_content_for_gemini(rule_findings)
-                pre_labels = summarize_rule_findings(rule_findings)
+            st.session_state.analyzing = True
+            findings = []
+            exec_summary = {}
+            analysis_ready = False
+            try:
+                with st.spinner(f"🤖 {t('gemini_logs_spinner')}"):
+                    flagged_content = get_flagged_content_for_gemini(rule_findings)
+                    pre_labels = summarize_rule_findings(rule_findings)
 
-                gemini_findings = analyze_logs(
-                    flagged_content, pre_labels, st.session_state.api_key
-                )
-                findings = merge_rule_and_gemini_findings(gemini_findings, rule_findings)
+                    gemini_findings = analyze_logs(
+                        flagged_content, pre_labels, st.session_state.api_key
+                    )
+                    findings = merge_rule_and_gemini_findings(gemini_findings, rule_findings)
 
-                risk_score, severity_label = compute_risk_score(findings, rule_findings)
-                top_recommendations = generate_top_recommendations(findings)
+                    risk_score, severity_label = compute_risk_score(findings, rule_findings)
+                    top_recommendations = generate_top_recommendations(findings)
 
-                exec_summary = {}
-                if findings:
-                    with st.spinner(f"📝 {t('summary_spinner')}"):
-                        exec_summary = generate_executive_summary(
-                            findings, risk_score, severity_label, st.session_state.api_key
-                        )
+                    if findings:
+                        with st.spinner(f"📝 {t('summary_spinner')}"):
+                            exec_summary = generate_executive_summary(
+                                findings, risk_score, severity_label, st.session_state.api_key
+                            )
 
-                # Save to DB
-                analysis_id = save_analysis(
-                    analysis_type="log",
-                    input_filename=log_filename,
-                    input_preview=log_content[:500],
-                    risk_score=risk_score,
-                    severity_label=severity_label,
-                    findings=findings,
-                    executive_summary=json.dumps(exec_summary),
-                    language=st.session_state["language"],
-                    top_recommendations=top_recommendations,
-                    attack_timeline=attack_timeline
-                )
+                    analysis_id = save_analysis(
+                        analysis_type="log",
+                        input_filename=log_filename,
+                        input_preview=log_content[:500],
+                        risk_score=risk_score,
+                        severity_label=severity_label,
+                        findings=findings,
+                        executive_summary=json.dumps(exec_summary),
+                        language=st.session_state["language"],
+                        top_recommendations=top_recommendations,
+                        attack_timeline=attack_timeline
+                    )
 
-                save_uploaded_file(
-                    analysis_id, log_filename,
-                    len(log_content.encode()), "log",
-                    line_count=log_stats.get("total_lines", 0),
-                    flagged_count=len(rule_findings)
-                )
+                    save_uploaded_file(
+                        analysis_id, log_filename,
+                        len(log_content.encode()), "log",
+                        line_count=log_stats.get("total_lines", 0),
+                        flagged_count=len(rule_findings)
+                    )
 
-                # Store in session
-                st.session_state.last_findings = findings
-                st.session_state.last_rule_findings = rule_findings
-                st.session_state.last_risk_score = risk_score
-                st.session_state.last_severity = severity_label
-                st.session_state.last_exec_summary = exec_summary
-                st.session_state.last_top_recommendations = top_recommendations
-                st.session_state.last_attack_timeline = attack_timeline
-                st.session_state.last_analysis_id = analysis_id
-                st.session_state.last_analysis_type = "log"
-                st.session_state.last_input_name = log_filename
+                    st.session_state.last_findings = findings
+                    st.session_state.last_rule_findings = rule_findings
+                    st.session_state.last_risk_score = risk_score
+                    st.session_state.last_severity = severity_label
+                    st.session_state.last_exec_summary = exec_summary
+                    st.session_state.last_top_recommendations = top_recommendations
+                    st.session_state.last_attack_timeline = attack_timeline
+                    st.session_state.last_analysis_id = analysis_id
+                    st.session_state.last_analysis_type = "log"
+                    st.session_state.last_input_name = log_filename
+                    analysis_ready = True
+            except GeminiAPIError as exc:
+                st.error(f"{t('gemini_error')}: {exc}")
+            finally:
+                st.session_state.analyzing = False
 
-            st.success(f"✅ {t('analysis_complete_threats', count=len(findings))}")
-            st.rerun()
+            if analysis_ready:
+                st.success(f"✅ {t('analysis_complete_threats', count=len(findings))}")
+                st.rerun()
     else:
         st.info(t("logs_empty_state"))
 
@@ -841,7 +855,7 @@ elif page == "code":
     st.markdown("---")
 
     if not st.session_state.api_key_valid:
-        st.warning(f"⚠️ {t('api_required_warning')}")
+        st.info(f"ℹ️ {t('local_scan_available')}")
 
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -905,53 +919,63 @@ elif page == "code":
         col_btn, _ = st.columns([2, 3])
         with col_btn:
             analyze_btn = st.button(
-                f"🤖 {t('analyze_with_gemini')}",
-                disabled=not st.session_state.api_key_valid,
+                f"⏳ {t('analyzing')}" if st.session_state.analyzing else f"🤖 {t('analyze_with_gemini')}",
+                disabled=st.session_state.analyzing or not st.session_state.api_key_valid,
                 use_container_width=True
             )
 
         if analyze_btn and st.session_state.api_key_valid:
-            with st.spinner(f"🤖 {t('gemini_code_spinner')}"):
-                pre_labels = summarize_rule_findings(rule_findings)
-                gemini_findings = analyze_code(
-                    code_input, language, pre_labels, st.session_state.api_key
-                )
-                findings = merge_rule_and_gemini_findings(gemini_findings, rule_findings)
-                risk_score, severity_label = compute_risk_score(findings, rule_findings)
-                top_recommendations = generate_top_recommendations(findings)
+            st.session_state.analyzing = True
+            findings = []
+            exec_summary = {}
+            analysis_ready = False
+            try:
+                with st.spinner(f"🤖 {t('gemini_code_spinner')}"):
+                    pre_labels = summarize_rule_findings(rule_findings)
+                    gemini_findings = analyze_code(
+                        code_input, language, pre_labels, st.session_state.api_key
+                    )
+                    findings = merge_rule_and_gemini_findings(gemini_findings, rule_findings)
+                    risk_score, severity_label = compute_risk_score(findings, rule_findings)
+                    top_recommendations = generate_top_recommendations(findings)
 
-                exec_summary = {}
-                if findings:
-                    exec_summary = generate_executive_summary(
-                        findings, risk_score, severity_label, st.session_state.api_key
+                    if findings:
+                        exec_summary = generate_executive_summary(
+                            findings, risk_score, severity_label, st.session_state.api_key
+                        )
+
+                    analysis_id = save_analysis(
+                        analysis_type="code",
+                        input_filename=code_filename,
+                        input_preview=code_input[:500],
+                        risk_score=risk_score,
+                        severity_label=severity_label,
+                        findings=findings,
+                        executive_summary=json.dumps(exec_summary),
+                        language=st.session_state["language"],
+                        top_recommendations=top_recommendations,
+                        attack_timeline=[]
                     )
 
-                analysis_id = save_analysis(
-                    analysis_type="code",
-                    input_filename=code_filename,
-                    input_preview=code_input[:500],
-                    risk_score=risk_score,
-                    severity_label=severity_label,
-                    findings=findings,
-                    executive_summary=json.dumps(exec_summary),
-                    language=st.session_state["language"],
-                    top_recommendations=top_recommendations,
-                    attack_timeline=[]
-                )
+                    st.session_state.last_findings = findings
+                    st.session_state.last_rule_findings = rule_findings
+                    st.session_state.last_risk_score = risk_score
+                    st.session_state.last_severity = severity_label
+                    st.session_state.last_exec_summary = exec_summary
+                    st.session_state.last_top_recommendations = top_recommendations
+                    st.session_state.last_attack_timeline = []
+                    st.session_state.last_analysis_id = analysis_id
+                    st.session_state.last_analysis_type = "code"
+                    st.session_state.last_input_name = code_filename
+                    analysis_ready = True
+            except GeminiAPIError as exc:
+                st.error(f"{t('gemini_error')}: {exc}")
+            finally:
+                st.session_state.analyzing = False
 
-                st.session_state.last_findings = findings
-                st.session_state.last_rule_findings = rule_findings
-                st.session_state.last_risk_score = risk_score
-                st.session_state.last_severity = severity_label
-                st.session_state.last_exec_summary = exec_summary
-                st.session_state.last_top_recommendations = top_recommendations
-                st.session_state.last_attack_timeline = []
-                st.session_state.last_analysis_id = analysis_id
-                st.session_state.last_analysis_type = "code"
-                st.session_state.last_input_name = code_filename
-
-            st.success(f"✅ {t('analysis_complete_vulns', count=len(findings))}")
-            st.rerun()
+            if analysis_ready:
+                st.success(f"✅ {t('analysis_complete_vulns', count=len(findings))}")
+                st.rerun()
     else:
         st.info(t("code_empty_state"))
 
